@@ -22,6 +22,8 @@ class StationType(Enum):
 class Item:
     item_type: ItemType
     chopped: bool = False
+    ingredients: List[ItemType] = field(default_factory=list)  
+
 
 @dataclass
 class Player:
@@ -219,15 +221,27 @@ class GameModel:
                     for order in self.orders[:]:
                         if ItemType.BURGER in order.items_needed:
                             self.orders.remove(order)
-                            self.score += 100
+                            
+                            # Calculer les points selon le type de burger
+                            points = self.calculate_burger_points(player.held_item)
+                            self.score += points
+                            
+                            # Message selon les points
+                            if points == 10:
+                                print("Burger basique livré! +10 points")
+                            elif points == 15:
+                                print("Burger avec légume livré! +15 points")
+                            else:
+                                print("Burger complet livré! +20 points")
+                            
                             player.held_item = None
-                            print("Burger livré! +100 points")
                             return
                     print("Aucune commande pour ce burger")
                 else:
                     print("Cet item ne correspond à aucune commande")
             else:
                 print("Vous devez porter quelque chose pour livrer")
+
 
 
     
@@ -261,3 +275,24 @@ class GameModel:
                 print("Cet item ne peut pas être découpé")
         else:
             print("Aucune planche à découper avec un item à proximité")
+
+
+    def calculate_burger_points(self, burger_item: Item) -> int:
+        """Calcule les points pour un burger selon ses ingrédients"""
+        if burger_item.item_type != ItemType.BURGER:
+            return 0
+        
+        # Compter les légumes coupés dans le burger
+        veggie_count = 0
+        for ingredient in burger_item.ingredients:
+            if ingredient in [ItemType.TOMATO, ItemType.LETTUCE]:
+                veggie_count += 1
+        
+        # Attribution des points
+        if veggie_count == 0:
+            return 10  # Burger basique
+        elif veggie_count == 1:
+            return 15  # Burger avec 1 légume  
+        else:
+            return 20  # Burger complet (2 légumes)
+
