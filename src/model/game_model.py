@@ -19,10 +19,17 @@ class StationType(Enum):
     DELIVERY = "delivery"
 
 @dataclass
+class BurgerIngredient:
+    item_type: ItemType
+    is_chopped: bool = False
+
+
+@dataclass
 class Item:
     item_type: ItemType
     chopped: bool = False
-    ingredients: List[ItemType] = field(default_factory=list)  
+    burger_ingredients: List[BurgerIngredient] = field(default_factory=list)  # Ingrédients avec leur état
+
 
 
 @dataclass
@@ -278,21 +285,22 @@ class GameModel:
 
 
     def calculate_burger_points(self, burger_item: Item) -> int:
-        """Calcule les points pour un burger selon ses ingrédients"""
+        """Calcule les points pour un burger selon ses ingrédients COUPÉS"""
         if burger_item.item_type != ItemType.BURGER:
             return 0
         
-        # Compter les légumes coupés dans le burger
-        veggie_count = 0
-        for ingredient in burger_item.ingredients:
-            if ingredient in [ItemType.TOMATO, ItemType.LETTUCE]:
-                veggie_count += 1
+        # Compter seulement les légumes qui sont coupés
+        chopped_veggie_count = 0
+        for ingredient in burger_item.burger_ingredients:
+            if ingredient.item_type in [ItemType.TOMATO, ItemType.LETTUCE] and ingredient.is_chopped:
+                chopped_veggie_count += 1
         
-        # Attribution des points
-        if veggie_count == 0:
-            return 10  # Burger basique
-        elif veggie_count == 1:
-            return 15  # Burger avec 1 légume  
+        # Attribution des points selon les légumes COUPÉS
+        if chopped_veggie_count == 0:
+            return 10  # Burger basique (pas de légumes coupés)
+        elif chopped_veggie_count == 1:
+            return 15  # Burger avec 1 légume coupé
         else:
-            return 20  # Burger complet (2 légumes)
+            return 20  # Burger complet (2 légumes coupés)
+
 
