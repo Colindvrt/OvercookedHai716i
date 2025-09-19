@@ -51,12 +51,30 @@ class GameView:
                 color = (100, 150, 100)
             elif station.station_type == StationType.DELIVERY:
                 color = (100, 100, 200)
+            elif station.station_type == StationType.INGREDIENT_SPAWN:
+                color = (150, 100, 150)
             
             pygame.draw.rect(self.screen, color, (station.x - 25, station.y - 25, 50, 50))
+            
+            # Bordure pour indiquer les stations interactives
+            pygame.draw.rect(self.screen, (255, 255, 255), (station.x - 25, station.y - 25, 50, 50), 2)
             
             # Item sur la station
             if station.item:
                 self._draw_item(station.item, station.x, station.y - 10)
+            
+            # Indicateur de cuisson sur le fourneau
+            if (station.station_type == StationType.STOVE and station.item and 
+                station.item.item_type == ItemType.RAW_PATTY and station.cooking_start_time > 0):
+                cooking_progress = (time.time() - station.cooking_start_time) / station.cooking_duration
+                cooking_progress = min(1.0, cooking_progress)
+                # Barre de progression
+                bar_width = 40
+                bar_height = 6
+                bar_x = station.x - bar_width // 2
+                bar_y = station.y + 30
+                pygame.draw.rect(self.screen, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height))
+                pygame.draw.rect(self.screen, (255, 200, 0), (bar_x, bar_y, int(bar_width * cooking_progress), bar_height))
             
             # Ingrédient spawn indicator
             if station.station_type == StationType.INGREDIENT_SPAWN and station.ingredient_type:
@@ -107,3 +125,13 @@ class GameView:
             order_text = f"Commande {i+1}: Burger ({int(order.time_remaining)}s)"
             text_surface = self.small_font.render(order_text, True, self.COLORS['text'])
             self.screen.blit(text_surface, (10, y_offset + i * 25))
+        
+        # Instructions
+        instructions = [
+            "ESPACE: Ramasser/Poser",
+            "C: Découper",
+            "Flèches: Se déplacer"
+        ]
+        for i, instruction in enumerate(instructions):
+            text = self.small_font.render(instruction, True, self.COLORS['text'])
+            self.screen.blit(text, (600, 10 + i * 20))
