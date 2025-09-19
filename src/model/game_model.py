@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from enum import Enum
 import time
 
@@ -35,9 +35,11 @@ class Station:
     y: int
     station_type: StationType
     item: Optional[Item] = None
-    cooking_start_time: float = 0
+    cooking_start_time: float = 0.0
     cooking_duration: float = 3.0  # 3 secondes pour cuire
     ingredient_type: Optional[ItemType] = None  # Pour les spawn points
+    # Nouveau : pile d’ingrédients en cours d’assemblage
+    contents: List[Item] = field(default_factory=list)
 
 @dataclass
 class Order:
@@ -105,7 +107,7 @@ class GameModel:
                 station.item and station.item.item_type == ItemType.RAW_PATTY and
                 current_time - station.cooking_start_time >= station.cooking_duration):
                 station.item = Item(ItemType.COOKED_PATTY)
-                station.cooking_start_time = 0
+                station.cooking_start_time = 0.0
     
     def move_player(self, player_index: int, dx: int, dy: int):
         """Déplace un joueur"""
@@ -117,7 +119,7 @@ class GameModel:
             player.y = new_y
     
     def interact_with_station(self, player_index: int):
-        """Gère l'interaction joueur-station"""
+        """Gère l'interaction joueur-station (touche ESPACE)"""
         if player_index >= len(self.players):
             return
         
@@ -167,6 +169,7 @@ class GameModel:
                 print("Vous avez déjà quelque chose en main et la planche est occupée")
             else:
                 print("Planche vide - posez d'abord un item à couper")
+        
         elif station.station_type == StationType.STOVE:
             if player.held_item and not station.item:
                 # Déposer sur le fourneau
@@ -181,7 +184,7 @@ class GameModel:
                 # Prendre de la cuisinière
                 player.held_item = station.item
                 station.item = None
-                station.cooking_start_time = 0
+                station.cooking_start_time = 0.0
                 print("Item récupéré du fourneau")
             elif station.item:
                 # Vérifier l'état de cuisson
@@ -193,29 +196,91 @@ class GameModel:
                     print(f"Cuisson en cours... {remaining:.1f}s restantes")
         
         elif station.station_type == StationType.ASSEMBLY:
-            if player.held_item and not station.item:
-                station.item = player.held_item
-                player.held_item = None
-                print(f"Item {station.item.item_type.value} posé à l'assemblage")
-            elif station.item and not player.held_item:
-                player.held_item = station.item
-                station.item = None
-                print("Item récupéré de l'assemblage")
-            elif (station.item and player.held_item):
-                # Essayer d'assembler un burger
-                if ((station.item.item_type == ItemType.BREAD and player.held_item.item_type == ItemType.COOKED_PATTY) or
-                    (station.item.item_type == ItemType.COOKED_PATTY and player.held_item.item_type == ItemType.BREAD)):
-                    station.item = Item(ItemType.BURGER)
-                    player.held_item = None
-                    print("Burger assemblé!")
+            # Logique d’assemblage multi-ingrédients
+            def burger_ready(contents: List[Item]) -> bool:
+                types = {it.item_type for it in contents}
+                has_bread = ItemType.BREAD in types
+                has_cooked = ItemType.COOKED_PATTY in types
+                has_chopped_tomato = any(it.item_type == ItemType.TOMATO and it.chopped for it in contents)
+                has_chopped_lettuce = any(it.item_type == ItemType.LETTUCE and it.chopped for it in contents)
+                return has_bread and has_cooked and has_chopped_tomato and has_chopped_lettuce
+
+            # Si un burger final est déjà prêt sur la station
+            if station.item and station.item.item_type == ItemType.BURGER:
+                if not player.held_item:
+                    player.held_item = station.item
+                    station.item = None
+                    print("Burger récupéré de l'assemblage")
                 else:
-                    print("Ces ingrédients ne peuvent pas être assemblés ensemble")
+                    print("Vous avez déjà quelque chose en main")
+                return
+
+            # Dépôt / reprise d’ingrédients avant burger
+            if player.held_item:
+                held = player.held_item
+                # 1) Aucun ingrédient posé → exiger le pain en premier
+                if not station.contents:
+                    if held.item_type == ItemType.BREAD:
+                        station.contents.append(held)
+                        player.held_item = None
+                        print("Pain posé sur l'assemblage")
+                    else:
+                        print("Posez d'abord le pain")
+                        return
+                else:
+                    # 2) Après le pain → accepter steak cuit, tomate coupée, salade coupée (une seule fois chacun)
+                    if held.item_type == ItemType.COOKED_PATTY:
+                        if any(i.item_type == ItemType.COOKED_PATTY for i in station.contents):
+                            print("Steak déjà posé")
+                            return
+                        station.contents.append(held)
+                        player.held_item = None
+                        print("Steak cuit ajouté")
+                    elif held.item_type == ItemType.TOMATO:
+                        if not held.chopped:
+                            print("La tomate doit être coupée")
+                            return
+                        if any(i.item_type == ItemType.TOMATO for i in station.contents):
+                            print("Tomate déjà posée")
+                            return
+                        station.contents.append(held)
+                        player.held_item = None
+                        print("Tomate coupée ajoutée")
+                    elif held.item_type == ItemType.LETTUCE:
+                        if not held.chopped:
+                            print("La salade doit être coupée")
+                            return
+                        if any(i.item_type == ItemType.LETTUCE for i in station.contents):
+                            print("Salade déjà posée")
+                            return
+                        station.contents.append(held)
+                        player.held_item = None
+                        print("Salade coupée ajoutée")
+                    elif held.item_type == ItemType.BREAD:
+                        print("Le pain est déjà posé")
+                        return
+                    else:
+                        print("Cet ingrédient ne fait pas partie du burger")
+                        return
+
+                # Vérifier la complétion du burger
+                if burger_ready(station.contents):
+                    station.item = Item(ItemType.BURGER)
+                    station.contents.clear()
+                    print("Burger assemblé !")
+
+            else:
+                # Mains vides et burger pas encore prêt : reprendre le dernier ingrédient posé
+                if station.contents:
+                    last = station.contents.pop()
+                    player.held_item = last
+                    print(f"{last.item_type.value} repris de l'assemblage")
+                else:
+                    print("Rien à récupérer ici")
         
         elif station.station_type == StationType.DELIVERY:
             if player.held_item:
-                # Essayer de livrer
                 if player.held_item.item_type == ItemType.BURGER:
-                    # Chercher une commande correspondante
                     for order in self.orders[:]:
                         if ItemType.BURGER in order.items_needed:
                             self.orders.remove(order)
@@ -228,11 +293,9 @@ class GameModel:
                     print("Cet item ne correspond à aucune commande")
             else:
                 print("Vous devez porter quelque chose pour livrer")
-
-
     
     def chop_at_station(self, player_index: int):
-        """Découpe un item sur la planche à découper la plus proche"""
+        """Découpe un item sur la planche à découper la plus proche (touche C)"""
         if player_index >= len(self.players):
             return
         

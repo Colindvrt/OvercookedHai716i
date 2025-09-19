@@ -18,11 +18,10 @@ class GameView:
             'tomato': (255, 0, 0),
             'lettuce': (0, 255, 0),
             'bread': (200, 150, 100),
-            'patty_raw': (150, 50, 50),
-            'patty_cooked': (100, 50, 25),
+            'cooked_patty': (100, 50, 25),
+            'raw_patty': (150, 50, 50),
             'burger': (255, 200, 100),
             'text': (255, 255, 255),
-            'order_bg': (0, 0, 0, 128)
         }
         
         self.font = pygame.font.Font(None, 24)
@@ -41,7 +40,7 @@ class GameView:
     def _draw_stations(self, stations: List):
         """Dessine toutes les stations"""
         for station in stations:
-            # Station de base
+            # Couleur selon type de station
             color = self.COLORS['station']
             if station.station_type == StationType.STOVE:
                 color = (200, 100, 100)
@@ -55,20 +54,27 @@ class GameView:
                 color = (150, 100, 150)
             
             pygame.draw.rect(self.screen, color, (station.x - 25, station.y - 25, 50, 50))
-            
-            # Bordure pour indiquer les stations interactives
             pygame.draw.rect(self.screen, (255, 255, 255), (station.x - 25, station.y - 25, 50, 50), 2)
             
-            # Item sur la station
-            if station.item:
-                self._draw_item(station.item, station.x, station.y - 10)
+            # Affichage spécifique pour l'assemblage : pile d'ingrédients
+            if station.station_type == StationType.ASSEMBLY:
+                if getattr(station, "contents", None):
+                    for idx, it in enumerate(station.contents):
+                        # empilement visuel vers le haut
+                        self._draw_item(it, station.x, station.y - 12 - idx * 12)
+                if station.item and station.item.item_type == ItemType.BURGER:
+                    # burger final un peu plus bas pour le distinguer
+                    self._draw_item(station.item, station.x, station.y + 10)
+            else:
+                # Autres stations : afficher l'item si présent
+                if station.item:
+                    self._draw_item(station.item, station.x, station.y - 10)
             
             # Indicateur de cuisson sur le fourneau
-            if (station.station_type == StationType.STOVE and station.item and 
-                station.item.item_type == ItemType.RAW_PATTY and station.cooking_start_time > 0):
+            if (station.station_type == StationType.STOVE and 
+                station.item and station.item.item_type == ItemType.RAW_PATTY and station.cooking_start_time > 0):
                 cooking_progress = (time.time() - station.cooking_start_time) / station.cooking_duration
-                cooking_progress = min(1.0, cooking_progress)
-                # Barre de progression
+                cooking_progress = min(1.0, max(0.0, cooking_progress))
                 bar_width = 40
                 bar_height = 6
                 bar_x = station.x - bar_width // 2
@@ -76,7 +82,7 @@ class GameView:
                 pygame.draw.rect(self.screen, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height))
                 pygame.draw.rect(self.screen, (255, 200, 0), (bar_x, bar_y, int(bar_width * cooking_progress), bar_height))
             
-            # Ingrédient spawn indicator
+            # Ingrédient spawn : petit indicateur fantôme
             if station.station_type == StationType.INGREDIENT_SPAWN and station.ingredient_type:
                 item_dummy = type('Item', (), {'item_type': station.ingredient_type, 'chopped': False})()
                 self._draw_item(item_dummy, station.x, station.y + 10, alpha=128)
@@ -86,7 +92,6 @@ class GameView:
         color = self.COLORS.get(item.item_type.value, (255, 255, 255))
         
         if alpha < 255:
-            # Créer une surface avec alpha pour les indicateurs
             surf = pygame.Surface((15, 15))
             surf.set_alpha(alpha)
             surf.fill(color)
@@ -94,17 +99,14 @@ class GameView:
         else:
             pygame.draw.circle(self.screen, color, (x, y), 8)
             
-        # Indicateur si l'item est coupé
+        # Indicateur si l'item est coupé (petit point blanc)
         if hasattr(item, 'chopped') and item.chopped:
             pygame.draw.circle(self.screen, (255, 255, 255), (x + 5, y - 5), 3)
     
     def _draw_players(self, players: List):
         """Dessine tous les joueurs"""
-        for i, player in enumerate(players):
-            # Joueur
+        for _, player in enumerate(players):
             pygame.draw.circle(self.screen, self.COLORS['player'], (player.x, player.y), 20)
-            
-            # Item porté
             if player.held_item:
                 self._draw_item(player.held_item, player.x, player.y - 30)
     
@@ -128,8 +130,8 @@ class GameView:
         
         # Instructions
         instructions = [
-            "ESPACE: Ramasser/Poser",
-            "C: Découper",
+            "ESPACE: Ramasser/Poser/Assembler",
+            "C: Découper (sur planche)",
             "Flèches: Se déplacer"
         ]
         for i, instruction in enumerate(instructions):
