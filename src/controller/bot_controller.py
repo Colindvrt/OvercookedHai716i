@@ -18,16 +18,17 @@ class AIBot:
     Bot pas-à-pas (une action à la fois) avec délai global entre actions.
     Respect strict: une seule chose en main.
     Recette: pain (sur ASSEMBLY) -> steak cuit -> tomate coupée -> salade coupée -> burger -> livraison
+
+    ⚠ Mouvement: le bot se place désormais **SOUS** la case cible (ancre: y + 50px) avant d'interagir.
     """
 
     def __init__(self, player_index: int = 0):
         self.player_index = player_index
         self.queue: List[Tuple[Step, Optional[Station], float]] = []  # (step, station, deadline)
-        self._cooldown = 0.7              # anti-spam interact/chop
+        self._cooldown = 0.0         # anti-spam pour INTERACT/CHOP (demandé)
         self._last_action_ts = 0.0
-        self._step_gap = 0.7              # délai global entre TOUTES les actions
+        self._step_gap = 0.4            # délai global entre TOUTES les actions (déplacements inclus)
         self._gap_until = 0.0
-        self._current_objective = None    # 🔧 Ajout pour suivre l'objectif actuel
 
     # ------------- Helpers accès modèle -------------
     def _p(self, m: GameModel) -> Player:
@@ -77,29 +78,24 @@ class AIBot:
                 return b
         return None
 
-    # ------------- État assemblage -------------
-    def _assembly_has_bread(self, m: GameModel) -> bool:
-        a = self._assembly(m)
-        return any(i.item_type == ItemType.BREAD for i in a.contents)
+    # ------------- Ancre "SOUS la case" -------------
+    def _anchor(self, s: Station) -> Tuple[int, int]:
+        """
+        Renvoie le point-cible où se placer AVANT d'interagir: sous la case (y + 50).
+        On clamp dans l'aire de jeu (0..750, 0..550) par sécurité.
+        """
+        ax = s.x
+        ay = min(550, s.y + 50)  # 1 case (50px) sous la station
+        return ax, ay
 
-    def _assembly_has(self, m: GameModel, it: ItemType) -> bool:
-        a = self._assembly(m)
-        return any(i.item_type == it for i in a.contents)
-
-    def _assembly_has_chopped(self, m: GameModel, it: ItemType) -> bool:
-        a = self._assembly(m)
-        return any(i.item_type == it and i.chopped for i in a.contents)
-
-    def _burger_ready_on_assembly(self, m: GameModel) -> bool:
-        a = self._assembly(m)
-        return a.item is not None and a.item.item_type == ItemType.BURGER
-
-    # ------------- Mouvement / actions -------------
-    def _near(self, px: int, py: int, s: Station, dist: int = 70) -> bool:
-        return abs(px - s.x) + abs(py - s.y) <= dist
+    # ------------- Proximité / Mouvement / Actions -------------
+    def _near(self, px: int, py: int, s: Station, tol: int = 10) -> bool:
+        """Considère 'arrivé' si l'on est proche de l'ANCRE (s.x, s.y+50) à ±10px."""
+        ax, ay = self._anchor(s)
+        return abs(px - ax) <= tol and abs(py - ay) <= tol
 
     def _move_towards(self, m: GameModel, target_x: int, target_y: int):
-        """Un seul pas (50 px) par appel, comme tes inputs clavier."""
+        """Un seul pas (50 px) par appel, comme les inputs clavier."""
         p = self._p(m)
         dx = 0
         dy = 0
@@ -109,6 +105,18 @@ class AIBot:
         elif p.y > target_y: dy = -1
         if dx != 0 or dy != 0:
             m.move_player(self.player_index, dx, dy)
+
+    def _move_to_anchor_step(self, m: GameModel, s: Station) -> bool:
+        """
+        Fait UN déplacement vers l'ancre sous la station s.
+        Retourne True si un pas a été fait, False si déjà à l'ancre.
+        """
+        ax, ay = self._anchor(s)
+        p = self._p(m)
+        if not self._near(p.x, p.y, s):
+            self._move_towards(m, ax, ay)
+            return True
+        return False
 
     def _interact(self, m: GameModel):
         m.interact_with_station(self.player_index)
@@ -129,11 +137,23 @@ class AIBot:
 
     def _reset_queue(self):
         self.queue.clear()
-        self._current_objective = None  # 🔧 Reset l'objectif
 
-    def _set_objective(self, objective: str):
-        """🔧 Définit l'objectif actuel pour éviter les conflits"""
-        self._current_objective = objective
+    # ------------- État assemblage -------------
+    def _assembly_has_bread(self, m: GameModel) -> bool:
+        a = self._assembly(m)
+        return any(i.item_type == ItemType.BREAD for i in a.contents)
+
+    def _assembly_has(self, m: GameModel, it: ItemType) -> bool:
+        a = self._assembly(m)
+        return any(i.item_type == it for i in a.contents)
+
+    def _assembly_has_chopped(self, m: GameModel, it: ItemType) -> bool:
+        a = self._assembly(m)
+        return any(i.item_type == it and i.chopped for i in a.contents)
+
+    def _burger_ready_on_assembly(self, m: GameModel) -> bool:
+        a = self._assembly(m)
+        return a.item is not None and a.item.item_type == ItemType.BURGER
 
     # ------------- Planification -------------
     def _plan(self, m: GameModel):
@@ -141,24 +161,14 @@ class AIBot:
         a = self._assembly(m)
         d = self._delivery(m)
 
-        # 🔧 Priorité absolue : si on a du pain en main et pas sur l'assembly
-        if (p.held_item and p.held_item.item_type == ItemType.BREAD and 
-            not self._assembly_has_bread(m)):
-            self._set_objective("place_bread")
-            self._push_with_gap(Step.GO_TO, a)
-            self._push_with_gap(Step.INTERACT, a)
-            return
-
         # Burger en main -> livrer
         if p.held_item and p.held_item.item_type == ItemType.BURGER:
-            self._set_objective("deliver_burger")
             self._push_with_gap(Step.GO_TO, d)
             self._push_with_gap(Step.INTERACT, d)
             return
 
         # Burger prêt -> prendre + livrer
         if self._burger_ready_on_assembly(m):
-            self._set_objective("take_and_deliver_burger")
             if p.held_item is None:
                 self._push_with_gap(Step.GO_TO, a)
                 self._push_with_gap(Step.INTERACT, a)
@@ -166,49 +176,57 @@ class AIBot:
             self._push_with_gap(Step.INTERACT, d)
             return
 
-        # 🔧 Pain d'abord - logique simplifiée et sécurisée
+        # Pain d'abord
         if not self._assembly_has_bread(m):
-            self._set_objective("get_bread")
             if p.held_item is None:
                 bspawn = self._spawn(m, ItemType.BREAD)
-                if bspawn:
-                    self._push_with_gap(Step.GO_TO, bspawn)
-                    self._push_with_gap(Step.INTERACT, bspawn)
+                self._push_with_gap(Step.GO_TO, bspawn)
+                self._push_with_gap(Step.INTERACT, bspawn)  # ramasser pain
+                self._push_with_gap(Step.GO_TO, a)
+                self._push_with_gap(Step.INTERACT, a)      # poser pain
                 return
-            # 🔧 Si on a le pain en main, le poser DIRECTEMENT sur l'assembly
-            elif p.held_item.item_type == ItemType.BREAD:
+            if p.held_item.item_type == ItemType.BREAD:
                 self._push_with_gap(Step.GO_TO, a)
                 self._push_with_gap(Step.INTERACT, a)
                 return
-            # 🔧 Si on a autre chose que le pain, le poser intelligemment
-            else:
-                self._clear_hands_strategically(m, p.held_item.item_type)
+            # Libérer les mains logiquement
+            held = p.held_item.item_type
+            if held in (ItemType.TOMATO, ItemType.LETTUCE):
+                board = self._free_board(m)
+                if board:
+                    self._push_with_gap(Step.GO_TO, board)
+                    self._push_with_gap(Step.INTERACT, board)
+                return
+            if held == ItemType.RAW_PATTY:
+                stove = self._free_stove(m)
+                if stove:
+                    self._push_with_gap(Step.GO_TO, stove)
+                    self._push_with_gap(Step.INTERACT, stove)
+                return
+            if held == ItemType.COOKED_PATTY:
+                self._push(Step.WAIT, None, self._step_gap)
                 return
 
         # Steak cuit
         if not self._assembly_has(m, ItemType.COOKED_PATTY):
-            self._set_objective("get_cooked_patty")
             if p.held_item and p.held_item.item_type == ItemType.COOKED_PATTY:
                 self._push_with_gap(Step.GO_TO, a)
                 self._push_with_gap(Step.INTERACT, a)
                 return
-            
             if p.held_item is None:
                 stove_cooked = self._stove_with(m, ItemType.COOKED_PATTY)
                 if stove_cooked:
                     self._push_with_gap(Step.GO_TO, stove_cooked)
                     self._push_with_gap(Step.INTERACT, stove_cooked)
+                    self._push_with_gap(Step.GO_TO, a)
+                    self._push_with_gap(Step.INTERACT, a)
                     return
-                
                 stove_raw = self._stove_with(m, ItemType.RAW_PATTY)
                 if stove_raw and stove_raw.cooking_start_time > 0:
                     self._push_with_gap(Step.GO_TO, stove_raw)
                     remaining = max(0.0, stove_raw.cooking_duration - (time.time() - stove_raw.cooking_start_time))
-                    if remaining < 0.5:  # Presque prêt
-                        self._push(Step.WAIT, None, remaining + 0.1)
+                    self._push(Step.WAIT, None, min(0.5, remaining))
                     return
-                
-                # Commencer la cuisson
                 rspawn = self._spawn(m, ItemType.RAW_PATTY)
                 stove = self._free_stove(m)
                 if rspawn and stove:
@@ -217,89 +235,119 @@ class AIBot:
                     self._push_with_gap(Step.GO_TO, stove)
                     self._push_with_gap(Step.INTERACT, stove)
                 return
-            else:
-                # Poser ce qu'on a en main
-                self._clear_hands_strategically(m, p.held_item.item_type)
+            # déposer ce qu'on tient
+            held = p.held_item.item_type
+            if held in (ItemType.TOMATO, ItemType.LETTUCE):
+                board = self._free_board(m)
+                if board:
+                    self._push_with_gap(Step.GO_TO, board)
+                    self._push_with_gap(Step.INTERACT, board)
+                return
+            if held == ItemType.RAW_PATTY:
+                stove = self._free_stove(m)
+                if stove:
+                    self._push_with_gap(Step.GO_TO, stove)
+                    self._push_with_gap(Step.INTERACT, stove)
+                return
+            if held == ItemType.BREAD:
+                self._push(Step.WAIT, None, self._step_gap)
                 return
 
         # Tomate coupée
         if not self._assembly_has_chopped(m, ItemType.TOMATO):
-            self._set_objective("get_chopped_tomato")
-            self._handle_chopped_ingredient(m, ItemType.TOMATO)
-            return
+            if p.held_item and p.held_item.item_type == ItemType.TOMATO and p.held_item.chopped:
+                self._push_with_gap(Step.GO_TO, a)
+                self._push_with_gap(Step.INTERACT, a)
+                return
+            if p.held_item is None:
+                ready = self._board_with(m, ItemType.TOMATO, chopped=True)
+                if ready:
+                    self._push_with_gap(Step.GO_TO, ready)
+                    self._push_with_gap(Step.INTERACT, ready)
+                    self._push_with_gap(Step.GO_TO, a)
+                    self._push_with_gap(Step.INTERACT, a)
+                    return
+                tspawn = self._spawn(m, ItemType.TOMATO)
+                board = self._free_board(m)
+                if tspawn and board:
+                    self._push_with_gap(Step.GO_TO, tspawn)
+                    self._push_with_gap(Step.INTERACT, tspawn)
+                    self._push_with_gap(Step.GO_TO, board)
+                    self._push_with_gap(Step.INTERACT, board)
+                    self._push_with_gap(Step.CHOP, board)
+                    self._push_with_gap(Step.INTERACT, board)
+                    self._push_with_gap(Step.GO_TO, a)
+                    self._push_with_gap(Step.INTERACT, a)
+                return
+            held = p.held_item.item_type
+            if held == ItemType.LETTUCE:
+                board = self._free_board(m)
+                if board:
+                    self._push_with_gap(Step.GO_TO, board)
+                    self._push_with_gap(Step.INTERACT, board)
+                return
+            if held == ItemType.COOKED_PATTY:
+                self._push_with_gap(Step.GO_TO, a)
+                self._push_with_gap(Step.INTERACT, a)
+                return
+            if held == ItemType.RAW_PATTY:
+                stove = self._free_stove(m)
+                if stove:
+                    self._push_with_gap(Step.GO_TO, stove)
+                    self._push_with_gap(Step.INTERACT, stove)
+                return
 
         # Salade coupée
         if not self._assembly_has_chopped(m, ItemType.LETTUCE):
-            self._set_objective("get_chopped_lettuce")
-            self._handle_chopped_ingredient(m, ItemType.LETTUCE)
-            return
+            if p.held_item and p.held_item.item_type == ItemType.LETTUCE and p.held_item.chopped:
+                self._push_with_gap(Step.GO_TO, a)
+                self._push_with_gap(Step.INTERACT, a)
+                return
+            if p.held_item is None:
+                ready = self._board_with(m, ItemType.LETTUCE, chopped=True)
+                if ready:
+                    self._push_with_gap(Step.GO_TO, ready)
+                    self._push_with_gap(Step.INTERACT, ready)
+                    self._push_with_gap(Step.GO_TO, a)
+                    self._push_with_gap(Step.INTERACT, a)
+                    return
+                lspawn = self._spawn(m, ItemType.LETTUCE)
+                board = self._free_board(m)
+                if lspawn and board:
+                    self._push_with_gap(Step.GO_TO, lspawn)
+                    self._push_with_gap(Step.INTERACT, lspawn)
+                    self._push_with_gap(Step.GO_TO, board)
+                    self._push_with_gap(Step.INTERACT, board)
+                    self._push_with_gap(Step.CHOP, board)
+                    self._push_with_gap(Step.INTERACT, board)
+                    self._push_with_gap(Step.GO_TO, a)
+                    self._push_with_gap(Step.INTERACT, a)
+                return
+            held = p.held_item.item_type
+            if held == ItemType.TOMATO:
+                board = self._free_board(m)
+                if board:
+                    self._push_with_gap(Step.GO_TO, board)
+                    self._push_with_gap(Step.INTERACT, board)
+                return
+            if held == ItemType.COOKED_PATTY:
+                self._push_with_gap(Step.GO_TO, a)
+                self._push_with_gap(Step.INTERACT, a)
+                return
+            if held == ItemType.RAW_PATTY:
+                stove = self._free_stove(m)
+                if stove:
+                    self._push_with_gap(Step.GO_TO, stove)
+                    self._push_with_gap(Step.INTERACT, stove)
+                return
 
-        # Dernier passage à l'assembly pour finaliser
-        self._set_objective("finalize_burger")
+        # Dernier passage à l'assembly pour finaliser (si nécessaire)
         if p.held_item:
             self._push_with_gap(Step.GO_TO, a)
             self._push_with_gap(Step.INTERACT, a)
         else:
             self._push_with_gap(Step.GO_TO, a)
             self._push(Step.WAIT, None, self._step_gap)
-
-    def _clear_hands_strategically(self, m: GameModel, held_type: ItemType):
-        """🔧 Fonction pour poser intelligemment l'objet en main"""
-        a = self._assembly(m)
-        
-        if held_type in (ItemType.TOMATO, ItemType.LETTUCE):
-            board = self._free_board(m)
-            if board:
-                self._push_with_gap(Step.GO_TO, board)
-                self._push_with_gap(Step.INTERACT, board)
-        elif held_type == ItemType.RAW_PATTY:
-            stove = self._free_stove(m)
-            if stove:
-                self._push_with_gap(Step.GO_TO, stove)
-                self._push_with_gap(Step.INTERACT, stove)
-        elif held_type in (ItemType.COOKED_PATTY, ItemType.BREAD):
-            # 🔧 Le steak cuit ET le pain vont directement à l'assembly
-            self._push_with_gap(Step.GO_TO, a)
-            self._push_with_gap(Step.INTERACT, a)
-        else:
-            # Par défaut, attendre un peu
-            self._push(Step.WAIT, None, self._step_gap)
-
-    def _handle_chopped_ingredient(self, m: GameModel, ingredient_type: ItemType):
-        """🔧 Gère la logique pour les ingrédients à couper"""
-        p = self._p(m)
-        a = self._assembly(m)
-        
-        # Si on a déjà l'ingrédient coupé en main
-        if (p.held_item and p.held_item.item_type == ingredient_type and 
-            p.held_item.chopped):
-            self._push_with_gap(Step.GO_TO, a)
-            self._push_with_gap(Step.INTERACT, a)
-            return
-        
-        if p.held_item is None:
-            # Chercher l'ingrédient déjà coupé
-            ready = self._board_with(m, ingredient_type, chopped=True)
-            if ready:
-                self._push_with_gap(Step.GO_TO, ready)
-                self._push_with_gap(Step.INTERACT, ready)
-                return
-            
-            # Commencer le processus de coupe
-            spawn = self._spawn(m, ingredient_type)
-            board = self._free_board(m)
-            if spawn and board:
-                self._push_with_gap(Step.GO_TO, spawn)
-                self._push_with_gap(Step.INTERACT, spawn)
-                self._push_with_gap(Step.GO_TO, board)
-                self._push_with_gap(Step.INTERACT, board)
-                self._push_with_gap(Step.CHOP, board)
-                self._push_with_gap(Step.INTERACT, board)
-            return
-        else:
-            # Poser ce qu'on a en main
-            self._clear_hands_strategically(m, p.held_item.item_type)
-            return
 
     # ------------- Exécution -------------
     def update(self, m: GameModel):
@@ -313,8 +361,8 @@ class AIBot:
         if now < self._gap_until:
             return
 
-        # 🔧 Vérification de cohérence - ne replanifier que si nécessaire
-        if not self.queue or self._should_replan(m):
+        # Planification si rien en attente
+        if not self.queue:
             self._plan(m)
             if not self.queue:
                 return
@@ -328,13 +376,13 @@ class AIBot:
                 self._gap_until = time.time() + self._step_gap
             return
 
-        # Pour GO_TO/INTERACT/CHOP liés à une station : se rapprocher d'abord
+        # Pour GO_TO/INTERACT/CHOP liés à une station :
         if station is not None:
-            p = self._p(m)
-            if not self._near(p.x, p.y, station):
-                self._move_towards(m, station.x, station.y)
+            # Se rapprocher de **l'ancre sous la case**
+            if self._move_to_anchor_step(m, station):
                 self._gap_until = time.time() + self._step_gap
                 return
+            # On est à l'ancre; on peut continuer.
 
         # Anti-spam pour INTERACT/CHOP
         if step in (Step.INTERACT, Step.CHOP) and (now - self._last_action_ts) < self._cooldown:
@@ -351,6 +399,15 @@ class AIBot:
             self._last_action_ts = time.time()
             self.queue.pop(0)
             self._gap_until = time.time() + self._step_gap
+
+            # Cas spécial : si on vient de prendre le pain au spawn, forcer la pose à l'ASSEMBLY
+            if station and station.station_type == StationType.INGREDIENT_SPAWN and station.ingredient_type == ItemType.BREAD:
+                p = self._p(m)
+                if p.held_item and p.held_item.item_type == ItemType.BREAD:
+                    self._reset_queue()
+                    a = self._assembly(m)
+                    self._push_with_gap(Step.GO_TO, a)
+                    self._push_with_gap(Step.INTERACT, a)
             return
 
         if step == Step.CHOP:
@@ -359,19 +416,3 @@ class AIBot:
             self.queue.pop(0)
             self._gap_until = time.time() + self._step_gap
             return
-
-    def _should_replan(self, m: GameModel) -> bool:
-        """🔧 Détermine s'il faut replanifier"""
-        p = self._p(m)
-        
-        # Replanifier si l'objectif actuel n'est plus valide
-        if self._current_objective == "place_bread":
-            # Si on n'a plus le pain en main ou si il est déjà posé
-            return not (p.held_item and p.held_item.item_type == ItemType.BREAD) or self._assembly_has_bread(m)
-        
-        if self._current_objective == "get_bread":
-            # Si le pain est maintenant sur l'assembly
-            return self._assembly_has_bread(m)
-        
-        # Pour les autres objectifs, moins de replanification agressive
-        return False
