@@ -366,4 +366,3 @@ class GameModel:
             return 15  # Burger avec 1 légume coupé
         else:
             return 20  # Burger complet (2 légumes coupés)
-
