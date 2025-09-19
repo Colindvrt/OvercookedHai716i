@@ -5,6 +5,9 @@ from src.view.game_view import GameView
 
 class GameController:
     def __init__(self):
+        # S'assurer que pygame est initialisé ici si ce n'est pas fait ailleurs
+        if not pygame.get_init():
+            pygame.init()
         self.model = GameModel()
         self.view = GameView()
         self.clock = pygame.time.Clock()
@@ -46,6 +49,6 @@ class GameController:
         elif event.key == pygame.K_SPACE:
             self.model.interact_with_station(0)
         elif event.key == pygame.K_c:
-            self.model.chop_at_station(0)  # Nouvelle action pour découper
+            self.model.chop_at_station(0)  # Action pour découper
         elif event.key == pygame.K_ESCAPE:
             self.running = False
