@@ -1,0 +1,21 @@
+[project]
+name = "overcooked-simple"
+version = "0.1.0"
+description = "Version simplifiée d'Overcooked en Python avec architecture MVC"
+authors = [{name = "Ton Nom", email = "ton.email@example.com"}]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pygame>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "flake8",
+    "pytest",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
