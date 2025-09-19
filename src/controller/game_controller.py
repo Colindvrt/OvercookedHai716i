@@ -45,5 +45,7 @@ class GameController:
             self.model.move_player(0, 1, 0)
         elif event.key == pygame.K_SPACE:
             self.model.interact_with_station(0)
+        elif event.key == pygame.K_c:
+            self.model.chop_at_station(0)  # Nouvelle action pour découper
         elif event.key == pygame.K_ESCAPE:
             self.running = False
