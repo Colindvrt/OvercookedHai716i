@@ -166,7 +166,7 @@ class AIBot:
             self._push_with_gap(Step.INTERACT, d)
             return
 
-        # 🔧 Pain d'abord - logique simplifiée
+        # 🔧 Pain d'abord - logique simplifiée et sécurisée
         if not self._assembly_has_bread(m):
             self._set_objective("get_bread")
             if p.held_item is None:
@@ -175,8 +175,13 @@ class AIBot:
                     self._push_with_gap(Step.GO_TO, bspawn)
                     self._push_with_gap(Step.INTERACT, bspawn)
                 return
+            # 🔧 Si on a le pain en main, le poser DIRECTEMENT sur l'assembly
+            elif p.held_item.item_type == ItemType.BREAD:
+                self._push_with_gap(Step.GO_TO, a)
+                self._push_with_gap(Step.INTERACT, a)
+                return
             # 🔧 Si on a autre chose que le pain, le poser intelligemment
-            elif p.held_item.item_type != ItemType.BREAD:
+            else:
                 self._clear_hands_strategically(m, p.held_item.item_type)
                 return
 
@@ -252,8 +257,8 @@ class AIBot:
             if stove:
                 self._push_with_gap(Step.GO_TO, stove)
                 self._push_with_gap(Step.INTERACT, stove)
-        elif held_type == ItemType.COOKED_PATTY:
-            # Le steak cuit va directement à l'assembly
+        elif held_type in (ItemType.COOKED_PATTY, ItemType.BREAD):
+            # 🔧 Le steak cuit ET le pain vont directement à l'assembly
             self._push_with_gap(Step.GO_TO, a)
             self._push_with_gap(Step.INTERACT, a)
         else:
