@@ -1,4 +1,3 @@
-# main.py
 import pygame
 import sys
 from src.controller.game_controller import GameController
