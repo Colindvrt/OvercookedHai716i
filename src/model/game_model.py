@@ -292,28 +292,19 @@ class GameModel:
                     for order in self.orders[:]:
                         if ItemType.BURGER in order.items_needed:
                             self.orders.remove(order)
-
                             
-                            # Calculer les points selon le type de burger
-                            points = self.calculate_burger_points(player.held_item)
-                            self.score += points
-                            
-                            # Message selon les points
-                            if points == 10:
-                                print("Burger basique livré! +10 points")
-                            elif points == 15:
-                                print("Burger avec légume livré! +15 points")
-                            else:
-                                print("Burger complet livré! +20 points")
+                            # Toujours 10 points
+                            self.score += 10
+                            print("Burger livré! +10 points")
                             
                             player.held_item = None
-
                             return
                     print("Aucune commande pour ce burger")
                 else:
                     print("Cet item ne correspond à aucune commande")
             else:
                 print("Vous devez porter quelque chose pour livrer")
+
 
     def chop_at_station(self, player_index: int):
         """Découpe un item sur la planche à découper la plus proche (touche C)"""
