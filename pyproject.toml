@@ -1,6 +1,12 @@
 [project]
 name = "overcooked-simple"
 version = "0.1.0"
+dependencies = [
+    "pygame>=2.6.1",
+]
+[tool.hatch.build.targets.wheel]
+packages = ["overcooked_simple"]
+
 description = "Version simplifiée d'Overcooked en Python avec architecture MVC"
 authors = [{name = "Ton Nom", email = "ton.email@example.com"}]
 readme = "README.md"
