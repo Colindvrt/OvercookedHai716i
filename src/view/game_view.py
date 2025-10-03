@@ -22,6 +22,11 @@ class GameView:
             'raw_patty': (150, 50, 50),
             'burger': (255, 200, 100),
             'text': (255, 255, 255),
+            # Couleurs pour le personnage cuisinier
+            'chef_skin': (255, 220, 177),
+            'chef_uniform': (255, 255, 255),
+            'chef_hat': (255, 255, 255),
+            'chef_eyes': (50, 50, 50),
         }
         
         self.font = pygame.font.Font(None, 24)
@@ -87,28 +92,161 @@ class GameView:
                 item_dummy = type('Item', (), {'item_type': station.ingredient_type, 'chopped': False})()
                 self._draw_item(item_dummy, station.x, station.y + 10, alpha=128)
     
-    def _draw_item(self, item, x: int, y: int, alpha: int = 255):
-        """Dessine un item"""
-        color = self.COLORS.get(item.item_type.value, (255, 255, 255))
-        
-        if alpha < 255:
-            surf = pygame.Surface((15, 15))
-            surf.set_alpha(alpha)
-            surf.fill(color)
-            self.screen.blit(surf, (x - 7, y - 7))
+    def _draw_tomato(self, x: int, y: int, chopped: bool = False, alpha: int = 255):
+        """Dessine une tomate réaliste"""
+        if chopped:
+            # Tomate coupée : plusieurs rondelles
+            for i in range(3):
+                offset_x = (i - 1) * 6
+                pygame.draw.circle(self.screen, (220, 50, 50), (x + offset_x, y), 5)
+                pygame.draw.circle(self.screen, (255, 100, 100), (x + offset_x, y), 3)
         else:
+            # Tomate entière : rouge brillant avec reflet
+            pygame.draw.circle(self.screen, (220, 50, 50), (x, y), 9)
+            pygame.draw.circle(self.screen, (180, 30, 30), (x, y), 9, 1)
+            # Tige verte
+            pygame.draw.line(self.screen, (50, 150, 50), (x, y - 9), (x, y - 13), 2)
+            pygame.draw.circle(self.screen, (50, 150, 50), (x, y - 9), 3)
+            # Reflet brillant
+            pygame.draw.circle(self.screen, (255, 150, 150), (x - 3, y - 3), 2)
+    
+    def _draw_lettuce(self, x: int, y: int, chopped: bool = False, alpha: int = 255):
+        """Dessine de la salade réaliste"""
+        if chopped:
+            # Salade coupée : plusieurs morceaux
+            pygame.draw.circle(self.screen, (100, 200, 100), (x - 4, y - 2), 4)
+            pygame.draw.circle(self.screen, (120, 220, 120), (x + 4, y), 4)
+            pygame.draw.circle(self.screen, (80, 180, 80), (x, y + 3), 4)
+        else:
+            # Feuille de salade : forme ondulée verte
+            points = [
+                (x - 8, y), (x - 6, y - 6), (x - 2, y - 8),
+                (x + 2, y - 8), (x + 6, y - 6), (x + 8, y),
+                (x + 6, y + 6), (x, y + 8), (x - 6, y + 6)
+            ]
+            pygame.draw.polygon(self.screen, (100, 200, 100), points)
+            pygame.draw.polygon(self.screen, (80, 180, 80), points, 1)
+            # Nervures
+            pygame.draw.line(self.screen, (80, 180, 80), (x, y - 6), (x, y + 6), 1)
+    
+    def _draw_bread(self, x: int, y: int, alpha: int = 255):
+        """Dessine du pain réaliste"""
+        # Pain en forme de dôme
+        pygame.draw.ellipse(self.screen, (210, 180, 140), (x - 10, y - 6, 20, 12))
+        pygame.draw.ellipse(self.screen, (180, 150, 110), (x - 10, y - 6, 20, 12), 1)
+        # Détails du pain (petites lignes)
+        pygame.draw.line(self.screen, (180, 150, 110), (x - 6, y - 2), (x - 3, y - 3), 1)
+        pygame.draw.line(self.screen, (180, 150, 110), (x + 3, y - 3), (x + 6, y - 2), 1)
+    
+    def _draw_patty(self, x: int, y: int, cooked: bool = False, alpha: int = 255):
+        """Dessine un steak haché réaliste"""
+        if cooked:
+            # Steak cuit : brun foncé avec marques de grill
+            pygame.draw.ellipse(self.screen, (100, 50, 25), (x - 10, y - 4, 20, 8))
+            pygame.draw.ellipse(self.screen, (80, 40, 20), (x - 10, y - 4, 20, 8), 1)
+            # Marques de grill
+            for i in range(3):
+                y_pos = y - 3 + i * 3
+                pygame.draw.line(self.screen, (60, 30, 15), (x - 8, y_pos), (x + 8, y_pos), 1)
+        else:
+            # Steak cru : rose/rouge
+            pygame.draw.ellipse(self.screen, (200, 80, 80), (x - 10, y - 4, 20, 8))
+            pygame.draw.ellipse(self.screen, (180, 60, 60), (x - 10, y - 4, 20, 8), 1)
+            # Texture de viande
+            pygame.draw.circle(self.screen, (180, 60, 60), (x - 3, y), 2)
+            pygame.draw.circle(self.screen, (180, 60, 60), (x + 4, y - 1), 2)
+    
+    def _draw_burger(self, x: int, y: int, alpha: int = 255):
+        """Dessine un burger complet réaliste"""
+        # Pain du haut (dôme)
+        pygame.draw.ellipse(self.screen, (210, 180, 140), (x - 12, y - 12, 24, 10))
+        pygame.draw.ellipse(self.screen, (180, 150, 110), (x - 12, y - 12, 24, 10), 1)
+        # Graines de sésame
+        for seed_x in [x - 6, x, x + 6]:
+            pygame.draw.circle(self.screen, (240, 230, 200), (seed_x, y - 8), 1)
+        
+        # Salade (vert qui dépasse)
+        pygame.draw.ellipse(self.screen, (100, 200, 100), (x - 14, y - 6, 28, 5))
+        
+        # Tomate (rouge qui dépasse)
+        pygame.draw.ellipse(self.screen, (220, 50, 50), (x - 13, y - 2, 26, 4))
+        
+        # Steak (brun)
+        pygame.draw.ellipse(self.screen, (100, 50, 25), (x - 11, y + 1, 22, 5))
+        
+        # Pain du bas
+        pygame.draw.ellipse(self.screen, (210, 180, 140), (x - 12, y + 5, 24, 6))
+        pygame.draw.ellipse(self.screen, (180, 150, 110), (x - 12, y + 5, 24, 6), 1)
+    
+    def _draw_item(self, item, x: int, y: int, alpha: int = 255):
+        """Dessine un item avec son apparence réaliste"""
+        chopped = getattr(item, 'chopped', False)
+        
+        if item.item_type == ItemType.TOMATO:
+            self._draw_tomato(x, y, chopped, alpha)
+        elif item.item_type == ItemType.LETTUCE:
+            self._draw_lettuce(x, y, chopped, alpha)
+        elif item.item_type == ItemType.BREAD:
+            self._draw_bread(x, y, alpha)
+        elif item.item_type == ItemType.RAW_PATTY:
+            self._draw_patty(x, y, cooked=False, alpha=alpha)
+        elif item.item_type == ItemType.COOKED_PATTY:
+            self._draw_patty(x, y, cooked=True, alpha=alpha)
+        elif item.item_type == ItemType.BURGER:
+            self._draw_burger(x, y, alpha)
+        else:
+            # Fallback : cercle simple
+            color = self.COLORS.get(item.item_type.value, (255, 255, 255))
             pygame.draw.circle(self.screen, color, (x, y), 8)
-            
-        # Indicateur si l'item est coupé (petit point blanc)
-        if hasattr(item, 'chopped') and item.chopped:
-            pygame.draw.circle(self.screen, (255, 255, 255), (x + 5, y - 5), 3)
+    
+    def _draw_chef_character(self, x: int, y: int):
+        """Dessine un personnage cuisinier avec tête, corps et toque"""
+        # Corps (rectangle blanc pour la veste de cuisinier)
+        body_rect = pygame.Rect(x - 12, y - 5, 24, 20)
+        pygame.draw.rect(self.screen, self.COLORS['chef_uniform'], body_rect)
+        pygame.draw.rect(self.screen, (200, 200, 200), body_rect, 2)  # Contour
+        
+        # Tête (cercle couleur peau)
+        head_center = (x, y - 18)
+        pygame.draw.circle(self.screen, self.COLORS['chef_skin'], head_center, 10)
+        
+        # Yeux (deux petits points noirs)
+        left_eye = (x - 4, y - 19)
+        right_eye = (x + 4, y - 19)
+        pygame.draw.circle(self.screen, self.COLORS['chef_eyes'], left_eye, 2)
+        pygame.draw.circle(self.screen, self.COLORS['chef_eyes'], right_eye, 2)
+        
+        # Sourire (petit arc)
+        mouth_points = [
+            (x - 4, y - 14),
+            (x, y - 12),
+            (x + 4, y - 14)
+        ]
+        pygame.draw.lines(self.screen, self.COLORS['chef_eyes'], False, mouth_points, 1)
+        
+        # Toque de cuisinier (chapeau blanc)
+        # Base de la toque (rectangle)
+        hat_base = pygame.Rect(x - 10, y - 28, 20, 5)
+        pygame.draw.rect(self.screen, self.COLORS['chef_hat'], hat_base)
+        
+        # Haut de la toque (ellipse gonflée)
+        hat_top = pygame.Rect(x - 8, y - 40, 16, 15)
+        pygame.draw.ellipse(self.screen, self.COLORS['chef_hat'], hat_top)
+        pygame.draw.ellipse(self.screen, (200, 200, 200), hat_top, 1)  # Contour
+        
+        # Jambes (deux petites lignes)
+        pygame.draw.line(self.screen, (100, 100, 100), (x - 6, y + 15), (x - 6, y + 25), 3)
+        pygame.draw.line(self.screen, (100, 100, 100), (x + 6, y + 15), (x + 6, y + 25), 3)
     
     def _draw_players(self, players: List):
         """Dessine tous les joueurs"""
         for _, player in enumerate(players):
-            pygame.draw.circle(self.screen, self.COLORS['player'], (player.x, player.y), 20)
+            # Dessiner le personnage cuisinier au lieu d'un simple cercle
+            self._draw_chef_character(player.x, player.y)
+            
+            # Si le joueur tient un item, l'afficher au-dessus de sa tête
             if player.held_item:
-                self._draw_item(player.held_item, player.x, player.y - 30)
+                self._draw_item(player.held_item, player.x, player.y - 45)
     
     def _draw_ui(self, model: GameModel):
         """Dessine l'interface utilisateur"""
@@ -132,8 +270,9 @@ class GameView:
         instructions = [
             "ESPACE: Ramasser/Poser/Assembler",
             "C: Découper (sur planche)",
-            "Flèches: Se déplacer"
+            "Flèches: Se déplacer",
+            "B: Toggle Bot"
         ]
         for i, instruction in enumerate(instructions):
             text = self.small_font.render(instruction, True, self.COLORS['text'])
-            self.screen.blit(text, (600, 10 + i * 20))
+            self.screen.blit(text, (580, 10 + i * 20))
