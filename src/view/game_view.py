@@ -8,7 +8,7 @@ class GameView:
         self.width = width
         self.height = height
         self.screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption("Overcooked Simplifié")
+        pygame.display.set_caption("Overcooked Simplifié - Multi-Recettes")
         
         # Couleurs
         self.COLORS = {
@@ -20,7 +20,10 @@ class GameView:
             'bread': (200, 150, 100),
             'cooked_patty': (100, 50, 25),
             'raw_patty': (150, 50, 50),
+            'cheese': (255, 255, 100),
             'burger': (255, 200, 100),
+            'pizza': (255, 180, 50),
+            'salad': (150, 255, 150),
             'text': (255, 255, 255),
         }
         
@@ -56,21 +59,18 @@ class GameView:
             pygame.draw.rect(self.screen, color, (station.x - 25, station.y - 25, 50, 50))
             pygame.draw.rect(self.screen, (255, 255, 255), (station.x - 25, station.y - 25, 50, 50), 2)
             
-            # Affichage spécifique pour l'assemblage : pile d'ingrédients
+            # Affichage spécifique pour l'assemblage
             if station.station_type == StationType.ASSEMBLY:
                 if getattr(station, "contents", None):
                     for idx, it in enumerate(station.contents):
-                        # empilement visuel vers le haut
                         self._draw_item(it, station.x, station.y - 12 - idx * 12)
-                if station.item and station.item.item_type == ItemType.BURGER:
-                    # burger final un peu plus bas pour le distinguer
+                if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]:
                     self._draw_item(station.item, station.x, station.y + 10)
             else:
-                # Autres stations : afficher l'item si présent
                 if station.item:
                     self._draw_item(station.item, station.x, station.y - 10)
             
-            # Indicateur de cuisson sur le fourneau
+            # Indicateur de cuisson
             if (station.station_type == StationType.STOVE and 
                 station.item and station.item.item_type == ItemType.RAW_PATTY and station.cooking_start_time > 0):
                 cooking_progress = (time.time() - station.cooking_start_time) / station.cooking_duration
@@ -82,7 +82,7 @@ class GameView:
                 pygame.draw.rect(self.screen, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height))
                 pygame.draw.rect(self.screen, (255, 200, 0), (bar_x, bar_y, int(bar_width * cooking_progress), bar_height))
             
-            # Ingrédient spawn : petit indicateur fantôme
+            # Ingrédient spawn : indicateur fantôme
             if station.station_type == StationType.INGREDIENT_SPAWN and station.ingredient_type:
                 item_dummy = type('Item', (), {'item_type': station.ingredient_type, 'chopped': False})()
                 self._draw_item(item_dummy, station.x, station.y + 10, alpha=128)
@@ -99,7 +99,7 @@ class GameView:
         else:
             pygame.draw.circle(self.screen, color, (x, y), 8)
             
-        # Indicateur si l'item est coupé (petit point blanc)
+        # Indicateur si l'item est coupé
         if hasattr(item, 'chopped') and item.chopped:
             pygame.draw.circle(self.screen, (255, 255, 255), (x + 5, y - 5), 3)
     
@@ -121,18 +121,40 @@ class GameView:
         time_text = self.font.render(f"Temps: {int(time_remaining)}s", True, self.COLORS['text'])
         self.screen.blit(time_text, (10, 40))
         
-        # Commandes
+        # Commandes avec icônes
         y_offset = 80
+        order_names = {
+            ItemType.BURGER: "🍔 Burger",
+            ItemType.PIZZA: "🍕 Pizza",
+            ItemType.SALAD: "🥗 Salade"
+        }
+        
         for i, order in enumerate(model.orders):
-            order_text = f"Commande {i+1}: Burger ({int(order.time_remaining)}s)"
-            text_surface = self.small_font.render(order_text, True, self.COLORS['text'])
-            self.screen.blit(text_surface, (10, y_offset + i * 25))
+            item_type = order.items_needed[0] if order.items_needed else None
+            if item_type:
+                order_name = order_names.get(item_type, item_type.value.capitalize())
+                order_text = f"Commande {i+1}: {order_name} ({int(order.time_remaining)}s)"
+                text_surface = self.small_font.render(order_text, True, self.COLORS['text'])
+                self.screen.blit(text_surface, (10, y_offset + i * 25))
+        
+        # Légende des recettes
+        legend_y = 500
+        legend_text = [
+            "Recettes:",
+            "Burger: Pain + Steak + Tomate + Salade",
+            "Pizza: Pain + Tomate + Fromage",
+            "Salade: Tomate + Salade (coupées)"
+        ]
+        for i, text in enumerate(legend_text):
+            surface = self.small_font.render(text, True, self.COLORS['text'])
+            self.screen.blit(surface, (10, legend_y + i * 18))
         
         # Instructions
         instructions = [
-            "ESPACE: Ramasser/Poser/Assembler",
-            "C: Découper (sur planche)",
-            "Flèches: Se déplacer"
+            "ESPACE: Ramasser/Poser",
+            "C: Découper",
+            "B: Toggle Bot",
+            "ESC: Quitter"
         ]
         for i, instruction in enumerate(instructions):
             text = self.small_font.render(instruction, True, self.COLORS['text'])
