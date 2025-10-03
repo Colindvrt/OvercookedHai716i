@@ -10,10 +10,11 @@ class ItemType(Enum):
     BREAD = "bread"
     COOKED_PATTY = "cooked_patty"
     RAW_PATTY = "raw_patty"
-    CHEESE = "cheese"  # Nouveau
+    CHEESE = "cheese"  
     BURGER = "burger"
-    PIZZA = "pizza"    # Nouveau
-    SALAD = "salad"    # Nouveau
+    PIZZA = "pizza"    
+    SALAD = "salad"    
+
 
 class StationType(Enum):
     INGREDIENT_SPAWN = "ingredient_spawn"
@@ -182,7 +183,7 @@ class GameModel:
     def _handle_assembly(self, player: Player, station: Station):
         """Gère l'assemblage multi-recettes"""
         # Si un plat fini est prêt, le prendre
-        if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]:
+        if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA]:
             if not player.held_item:
                 player.held_item = station.item
                 station.item = None
@@ -237,13 +238,7 @@ class GameModel:
             station.contents.clear()
             print("Pizza assemblée!")
         
-        # Salade: salade coupée + tomate coupée
-        elif (any(i.item_type == ItemType.LETTUCE and i.chopped for i in station.contents) and
-              any(i.item_type == ItemType.TOMATO and i.chopped for i in station.contents) and
-              len(station.contents) == 2):  # Seulement ces 2 ingrédients
-            station.item = Item(ItemType.SALAD)
-            station.contents.clear()
-            print("Salade assemblée!")
+        
     
     def _handle_delivery(self, player: Player):
         """Gère la livraison des plats"""
