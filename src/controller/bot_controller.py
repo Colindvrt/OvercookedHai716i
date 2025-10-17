@@ -79,6 +79,7 @@ class AIBot:
         self.internal_state = AgentState.IDLE
         self.current_recipe: Optional[Recipe] = None
         self.current_order: Optional[Order] = None
+        self.current_order_id: Optional[int] = None  # Track order ID
         
         # Plan d'actions (queue)
         self.queue: List[Tuple[Step, Optional[Station], float]] = []
@@ -101,6 +102,7 @@ class AIBot:
             'player_position': (p.x, p.y),
             'held_item': p.held_item,
             'active_orders': m.orders.copy(),
+            'active_order_ids': [o.id for o in m.orders],
             'score': m.score,
             'stations_state': self._perceive_stations(m),
             'assembly_state': self._perceive_assembly(m),
@@ -135,6 +137,14 @@ class AIBot:
         Fonction 'action' : décide de l'action à prendre
         basée sur l'état interne et les percepts
         """
+        # Check if current order still exists
+        if self.current_order_id is not None:
+            if self.current_order_id not in percepts['active_order_ids']:
+                # Order expired or was completed by someone else - abandon current task
+                print(f"Agent: Commande #{self.current_order_id} expirée/complétée - abandon")
+                self._abandon_current_task(percepts)
+                return
+        
         # Mettre à jour l'état interne basé sur les percepts
         self._update_internal_state(percepts)
         
@@ -150,6 +160,18 @@ class AIBot:
                 self.internal_state = AgentState.IDLE
                 self.current_recipe = None
                 self.current_order = None
+                self.current_order_id = None
+
+    def _abandon_current_task(self, percepts: Dict):
+        """Abandonne la tâche actuelle et nettoie l'état"""
+        self.queue.clear()
+        self.internal_state = AgentState.IDLE
+        self.current_recipe = None
+        self.current_order = None
+        self.current_order_id = None
+        
+        # If holding something that's not for any active order, consider dropping it
+        # For now, just reset state and let the agent pick a new order
 
     def _update_internal_state(self, percepts: Dict):
         """Fonction 'next' : met à jour l'état interne"""
@@ -173,6 +195,7 @@ class AIBot:
         
         # Prendre la commande la plus urgente
         self.current_order = min(orders, key=lambda o: o.time_remaining)
+        self.current_order_id = self.current_order.id
         
         # Identifier la recette correspondante
         if self.current_order.items_needed:
@@ -180,7 +203,7 @@ class AIBot:
             if needed_item in RECIPES:
                 self.current_recipe = RECIPES[needed_item]
                 self.internal_state = AgentState.EXECUTING_RECIPE
-                print(f"Agent: Nouvelle commande détectée - {self.current_recipe.name}")
+                print(f"Agent: Nouvelle commande #{self.current_order_id} - {self.current_recipe.name}")
 
     # ============ HELPERS ============
     def _p(self, m: GameModel) -> Player:
@@ -310,6 +333,14 @@ class AIBot:
         if not self.current_recipe:
             return
         
+        # Check if order still exists before planning
+        if self.current_order_id is not None:
+            order_exists = any(o.id == self.current_order_id for o in m.orders)
+            if not order_exists:
+                # Order expired, abandon
+                self._abandon_current_task({'active_order_ids': [o.id for o in m.orders]})
+                return
+        
         p = self._p(m)
         a = self._assembly(m)
         d = self._delivery(m)
@@ -322,14 +353,30 @@ class AIBot:
             self._push_with_gap(Step.INTERACT, d)
             return
         
-        # Si l'item final est prêt sur l'assemblage
+        # IMPORTANT: Check if the dish is already completed on assembly station
+        # This allows reusing dishes from expired orders
         if a.item and a.item.item_type == recipe.result:
-            if p.held_item is None:
-                self._push_with_gap(Step.GO_TO, a)
-                self._push_with_gap(Step.INTERACT, a)
-            self._push_with_gap(Step.GO_TO, d)
-            self._push_with_gap(Step.INTERACT, d)
-            return
+            # Check if it's overcooked - if so, we need to discard it
+            is_overcooked = getattr(a.item, 'overcooked', False)
+            if is_overcooked:
+                # Clear the overcooked item from assembly (simulating throwing it away)
+                # Take it and put it back to clear it
+                if p.held_item is None:
+                    self._push_with_gap(Step.GO_TO, a)
+                    self._push_with_gap(Step.INTERACT, a)
+                    # Now we're holding the overcooked item - put it back on assembly to "dispose" it
+                    self._push_with_gap(Step.INTERACT, a)
+                    print("🗑️ Chef disposing of overcooked dish")
+                return
+            else:
+                # Dish is ready and good quality - pick it up and deliver
+                if p.held_item is None:
+                    self._push_with_gap(Step.GO_TO, a)
+                    self._push_with_gap(Step.INTERACT, a)
+                self._push_with_gap(Step.GO_TO, d)
+                self._push_with_gap(Step.INTERACT, d)
+                print(f"♻️ Chef reusing completed {recipe.result.value} from previous order")
+                return
         
         # Premier ingrédient : doit être le pain (base)
         first_ingredient = recipe.ingredients[0][0]
