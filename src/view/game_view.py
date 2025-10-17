@@ -6,9 +6,14 @@ from src.model.game_model import GameModel, ItemType, StationType
 
 class GameView:
     def __init__(self, width: int = 1000, height: int = 700):  # Increased size
-        self.width = width
-        self.height = height
-        self.screen = pygame.display.set_mode((width, height))
+        
+        info = pygame.display.Info()
+        self.width = info.current_w
+        self.height = info.current_h
+        
+        
+        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        
         pygame.display.set_caption("Overcooked Deluxe - Multi-Recettes")
         
         self.COLORS = {
@@ -451,24 +456,37 @@ class GameView:
                 self._draw_item(player.held_item, player.x, int(player.y - 50 + bounce))
     
     def _draw_modern_ui(self, model):
-        # Score - Top Left (no timer here)
-        panel_width, panel_height = 220, 80
-        s = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        panel_margin = 15 # Marge générale par rapport aux bords
+        
+        # --- SCORE Panel (Bottom Left) ---
+        panel_width, score_panel_height = 220, 80
+        score_panel_x = panel_margin
+        # Position Y : self.height - hauteur_du_panneau - marge
+        score_panel_y = self.height - score_panel_height - panel_margin 
+        
+        # Background
+        s = pygame.Surface((panel_width, score_panel_height), pygame.SRCALPHA)
         s.fill((30, 30, 40, 200))
-        self.screen.blit(s, (15, 90))
-        pygame.draw.rect(self.screen, (255, 215, 0), pygame.Rect(15, 90, panel_width, panel_height), 3, border_radius=8)
+        self.screen.blit(s, (score_panel_x, score_panel_y))
+        pygame.draw.rect(self.screen, (255, 215, 0), pygame.Rect(score_panel_x, score_panel_y, panel_width, score_panel_height), 3, border_radius=8)
         
         # Score only
         score_text = self.large_font.render(f"${model.score}", True, (255, 215, 0))
-        score_rect = score_text.get_rect(center=(15 + panel_width // 2, 130))
+        # Centre Y : score_panel_y + moitié de la hauteur
+        score_rect = score_text.get_rect(center=(score_panel_x + panel_width // 2, score_panel_y + score_panel_height // 2))
         self.screen.blit(score_text, score_rect)
         
-        # Timer - Separate panel below score
+        # --- TIMER Panel (Above Score, Bottom Left) ---
         timer_panel_height = 70
+        timer_panel_x = panel_margin
+        # Position Y : juste au-dessus du panneau de score, avec une marge
+        timer_panel_y = score_panel_y - timer_panel_height - panel_margin 
+        
+        # Background
         s = pygame.Surface((panel_width, timer_panel_height), pygame.SRCALPHA)
         s.fill((30, 30, 40, 200))
-        self.screen.blit(s, (15, 185))
-        pygame.draw.rect(self.screen, (100, 200, 255), pygame.Rect(15, 185, panel_width, timer_panel_height), 3, border_radius=8)
+        self.screen.blit(s, (timer_panel_x, timer_panel_y))
+        pygame.draw.rect(self.screen, (100, 200, 255), pygame.Rect(timer_panel_x, timer_panel_y, panel_width, timer_panel_height), 3, border_radius=8)
         
         # Show timer or "Waiting..." message
         if model.game_started and model.start_time:
@@ -476,10 +494,11 @@ class GameView:
             timer_text = self.font.render(f"⏱ {int(time_remaining // 60):02d}:{int(time_remaining % 60):02d}", True, (255, 255, 255))
         else:
             timer_text = self.font.render("Waiting...", True, (150, 150, 150))
-        timer_rect = timer_text.get_rect(center=(15 + panel_width // 2, 220))
+        # Centre Y : timer_panel_y + moitié de la hauteur
+        timer_rect = timer_text.get_rect(center=(timer_panel_x + panel_width // 2, timer_panel_y + timer_panel_height // 2))
         self.screen.blit(timer_text, timer_rect)
         
-        # Orders Panel - Top Right (much clearer, no overlap with ingredients)
+        # --- Orders Panel - Top Right (Reste inchangé) ---
         order_names = {
             ItemType.BURGER: ("🍔", "Burger", (255, 200, 100)), 
             ItemType.PIZZA: ("🍕", "Pizza", (255, 180, 50)), 
@@ -550,7 +569,7 @@ class GameView:
                 time_text = self.small_font.render(f"{int(order.time_remaining)}s", True, (255, 255, 255))
                 self.screen.blit(time_text, (bar_x + bar_w - 35, bar_y - 2))
         
-        # Controls Panel - Bottom Right
+        # --- Controls Panel - Bottom Right (Reste inchangé) ---
         controls_w, controls_h = 240, 115
         s = pygame.Surface((controls_w, controls_h), pygame.SRCALPHA)
         s.fill((30, 30, 40, 200))
