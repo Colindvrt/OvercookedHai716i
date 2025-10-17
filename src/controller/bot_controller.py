@@ -87,7 +87,7 @@ class AIBot:
         # Timing controls
         self._cooldown = 0.0
         self._last_action_ts = 0.0
-        self._step_gap = 0.4
+        self._step_gap = 0.25
         self._gap_until = 0.0
 
     # ============ PERCEPTION (see function) ============
