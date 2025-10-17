@@ -14,6 +14,7 @@ class ItemType(Enum):
     CHEESE = "cheese"
     BURGER = "burger"
     PIZZA = "pizza"
+    UNCOOKED_PIZZA = "uncooked_pizza"
     SALAD = "salad"
 
 class StationType(Enum):
@@ -22,6 +23,7 @@ class StationType(Enum):
     STOVE = "stove"
     ASSEMBLY = "assembly"
     DELIVERY = "delivery"
+    FURNACE = "furnace"
 
 @dataclass
 class Item:
@@ -87,6 +89,7 @@ class GameModel:
             Station(250, 200, StationType.CUTTING_BOARD),
             Station(350, 200, StationType.STOVE),
             Station(450, 200, StationType.STOVE),
+            Station(550, 200, StationType.FURNACE),
         ])
         
         # Stations finales
@@ -98,7 +101,7 @@ class GameModel:
     def _generate_order(self):
         """Génère une nouvelle commande aléatoire"""
         if len(self.orders) < 3:
-            possible_orders = [ItemType.BURGER, ItemType.PIZZA]
+            possible_orders = [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]            
             chosen = random.choice(possible_orders)
             order = Order([chosen], id=self.next_order_id)
             self.next_order_id += 1
@@ -145,25 +148,36 @@ class GameModel:
         
         # Mise à jour des stations (cuisson et sur-cuisson)
         for station in self.stations:
-            if (station.station_type == StationType.STOVE and 
-                station.item and station.item.item_type == ItemType.RAW_PATTY and
+            if (station.station_type in [StationType.STOVE, StationType.FURNACE] and 
+                station.item and
                 station.cooking_start_time > 0):
                 
                 cooking_time = current_time - station.cooking_start_time
                 
                 # Cuit parfaitement
                 if cooking_time >= station.cooking_duration and cooking_time < station.overcook_duration:
-                    if station.item.item_type != ItemType.COOKED_PATTY:
+                    # Logique pour le steak
+                    if station.item.item_type == ItemType.RAW_PATTY and station.item.item_type != ItemType.COOKED_PATTY:
                         station.item = Item(ItemType.COOKED_PATTY)
                         print("✅ Steak parfaitement cuit!")
+                    # Logique pour la pizza
+                    elif station.item.item_type == ItemType.UNCOOKED_PIZZA and station.item.item_type != ItemType.PIZZA:
+                        station.item = Item(ItemType.PIZZA)
+                        print("✅ Pizza cuite à la perfection !")
                 
                 # Trop cuit / brûlé
                 elif cooking_time >= station.overcook_duration:
-                    if station.item.item_type != ItemType.BURNT_PATTY:
+                    # Logique pour le steak
+                    if station.item.item_type != ItemType.BURNT_PATTY and station.station_type == StationType.STOVE:
                         station.item = Item(ItemType.BURNT_PATTY, overcooked=True)
                         print("🔥 Steak brûlé! (Overcooked)")
                         station.cooking_start_time = 0.0
-    
+                    # Logique pour la pizza (elle peut aussi brûler !)
+                    elif station.item.item_type != ItemType.PIZZA and station.station_type == StationType.FURNACE:
+                        station.item = Item(ItemType.PIZZA, overcooked=True) # Une pizza brûlée est une "mauvaise" pizza
+                        print("🔥 Pizza brûlée ! (Overcooked)")
+                        station.cooking_start_time = 0.0
+
     def move_player(self, player_index: int, dx: int, dy: int):
         """Déplace un joueur"""
         if 0 <= player_index < len(self.players):
@@ -218,6 +232,19 @@ class GameModel:
                 player.held_item = station.item
                 station.item = None
                 station.cooking_start_time = 0.0
+
+        elif station.station_type == StationType.FURNACE:
+            if player.held_item and not station.item:
+                if player.held_item.item_type == ItemType.UNCOOKED_PIZZA:
+                    station.item = player.held_item
+                    player.held_item = None
+                    station.cooking_start_time = time.time()
+            elif station.item and not player.held_item:
+                # On ne peut prendre que des pizzas prêtes (cuites ou brûlées)
+                if station.item.item_type == ItemType.PIZZA:
+                    player.held_item = station.item
+                    station.item = None
+                    station.cooking_start_time = 0.0
         
         elif station.station_type == StationType.ASSEMBLY:
             self._handle_assembly(player, station)
@@ -228,7 +255,7 @@ class GameModel:
     def _handle_assembly(self, player: Player, station: Station):
         """Gère l'assemblage multi-recettes"""
         # Si un plat fini est prêt, le prendre
-        if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]:
+        if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD, ItemType.UNCOOKED_PIZZA]:
             if not player.held_item:
                 player.held_item = station.item
                 station.item = None
@@ -251,13 +278,6 @@ class GameModel:
             # Ne pas accepter de viande brûlée
             if held.item_type == ItemType.BURNT_PATTY:
                 print("❌ Viande brûlée, impossible de l'utiliser!")
-                return
-            
-            # Premier ingrédient : doit être le pain (base)
-            if not station.contents:
-                if held.item_type == ItemType.BREAD:
-                    station.contents.append(held)
-                    player.held_item = None
                 return
             
             # Ajouter l'ingrédient s'il n'est pas déjà présent
@@ -303,14 +323,11 @@ class GameModel:
         elif (ItemType.BREAD in types and
               any(i.item_type == ItemType.TOMATO and i.chopped for i in station.contents) and
               ItemType.CHEESE in types):
-            pizza = Item(ItemType.PIZZA)
+            pizza = Item(ItemType.UNCOOKED_PIZZA) 
             pizza.overcooked = has_overcooked
             station.item = pizza
             station.contents.clear()
-            if has_overcooked:
-                print("🍕 Pizza assemblée (mais trop cuite!)")
-            else:
-                print("🍕 Pizza assemblée!")
+            print("🍕 Pizza non cuite assemblée !")
         
         # Salade: salade coupée + tomate coupée
         elif (any(i.item_type == ItemType.LETTUCE and i.chopped for i in station.contents) and

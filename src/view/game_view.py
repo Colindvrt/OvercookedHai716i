@@ -21,6 +21,7 @@ class GameView:
             'chef_uniform': (255, 255, 255), 'chef_hat': (255, 255, 255), 'chef_eyes': (50, 50, 50),
             'stove_base': (50, 50, 60), 'stove_top': (70, 70, 80), 'fire': (255, 100, 0),
             'cutting_board': (205, 133, 63), 'metal': (192, 192, 192), 'shadow': (0, 0, 0, 60),
+            'furnace': (20, 20, 20), 
         }
         
         self.font = pygame.font.Font(None, 28)
@@ -90,6 +91,8 @@ class GameView:
         for station in stations:
             if station.station_type == StationType.STOVE:
                 self._draw_stove(station)
+            elif station.station_type == StationType.FURNACE:
+                self._draw_furnace(station)
             elif station.station_type == StationType.CUTTING_BOARD:
                 self._draw_cutting_board(station)
             elif station.station_type == StationType.ASSEMBLY:
@@ -128,7 +131,27 @@ class GameView:
                 pygame.draw.rect(self.screen, (50, 50, 50), (bar_x, bar_y, bar_width, bar_height), border_radius=4)
                 progress_color = (255, 200 - int(100 * cooking_progress), 0)
                 pygame.draw.rect(self.screen, progress_color, (bar_x + 2, bar_y + 2, int((bar_width - 4) * cooking_progress), bar_height - 4), border_radius=3)
-    
+
+    def _draw_furnace(self, station):
+        x, y = station.x, station.y
+        # Carré noir simple
+        pygame.draw.rect(self.screen, self.COLORS['furnace'], (x - 30, y - 25, 60, 50), border_radius=5)
+        pygame.draw.rect(self.screen, (50, 50, 50), (x - 30, y - 25, 60, 50), 3, border_radius=5)
+        
+        # Porte du four
+        pygame.draw.rect(self.screen, (40, 40, 40), (x - 25, y - 20, 50, 30))
+        
+        if station.item:
+            self._draw_item(station.item, x, y - 5)
+            if station.item.item_type == ItemType.UNCOOKED_PIZZA and station.cooking_start_time > 0:
+                cooking_progress = (time.time() - station.cooking_start_time) / station.cooking_duration
+                cooking_progress = min(1.0, max(0.0, cooking_progress))
+                bar_width, bar_height = 50, 8
+                bar_x, bar_y = x - bar_width // 2, y + 35
+                pygame.draw.rect(self.screen, (50, 50, 50), (bar_x, bar_y, bar_width, bar_height), border_radius=4)
+                progress_color = (255, 150 - int(100 * cooking_progress), 0)
+                pygame.draw.rect(self.screen, progress_color, (bar_x + 2, bar_y + 2, int((bar_width - 4) * cooking_progress), bar_height - 4), border_radius=3)
+
     def _draw_cutting_board(self, station):
         x, y = station.x, station.y
         shadow = pygame.Surface((60, 45), pygame.SRCALPHA)
@@ -160,7 +183,7 @@ class GameView:
         if hasattr(station, 'contents') and station.contents:
             for idx, item in enumerate(station.contents):
                 self._draw_item(item, x, y + 5 - idx * 8, scale=0.9)
-        if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]:
+        if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD, ItemType.UNCOOKED_PIZZA]:
             self._draw_item(station.item, x, y + 5)
             for i in range(3):
                 s = pygame.Surface((50, 50), pygame.SRCALPHA)
@@ -224,16 +247,15 @@ class GameView:
                     if order_id in self.customers:
                         del self.customers[order_id]
         
-        # Add new customers for new orders - position them in a queue
+        # Calculate spacing for customers based on the current number of orders
+        num_orders = len(model.orders)
+        available_width = self.width - 300  # Leave margins
+        spacing = min(250, available_width // max(num_orders, 1)) if num_orders > 0 else 250
+        start_x = 150
+
+        # Add new customers for new orders
         for idx, order in enumerate(model.orders):
             if order.id not in self.customers:
-                # Position customers in a visible queue - they should never overlap
-                # Calculate spacing to ensure all customers are always visible
-                num_orders = len(model.orders)
-                available_width = self.width - 300  # Leave margins
-                spacing = min(250, available_width // max(num_orders, 3))  # Ensure they don't get too close
-                start_x = 150
-                
                 target_x = start_x + idx * spacing
                 self.customers[order.id] = {
                     'x': self.width + 50, 
@@ -249,20 +271,17 @@ class GameView:
         
         # Update customer positions and expressions
         for order_id, customer in list(self.customers.items()):
-            # Update target position based on current queue index
             if not customer['leaving']:
                 order_idx = next((i for i, o in enumerate(model.orders) if o.id == order_id), -1)
                 if order_idx >= 0:
                     customer['order_index'] = order_idx
-                    num_orders = len(model.orders)
-                    available_width = self.width - 300
-                    spacing = min(250, available_width // max(num_orders, 3))
-                    customer['target_x'] = 150 + order_idx * spacing
+                    customer['target_x'] = start_x + order_idx * spacing
             
             if customer['leaving']:
                 customer['x'] += 4
                 if customer['x'] > self.width + 150:
-                    del self.customers[order_id]
+                    if order_id in self.customers:
+                        del self.customers[order_id]
             elif not customer['waiting']:
                 # Move towards target position
                 if abs(customer['x'] - customer['target_x']) > 5:
@@ -626,9 +645,12 @@ class GameView:
     
     def _draw_pizza(self, x, y, finished=True, alpha=255, scale=1.0):
         radius = int(18 * scale)
+        # Pâte
         pygame.draw.circle(self.screen, (240, 200, 140), (x, y), radius)
         pygame.draw.circle(self.screen, (200, 160, 100), (x, y), radius, 1)
+
         if finished:
+            # Pizza cuite (avec fromage fondu et garnitures)
             pygame.draw.circle(self.screen, (200, 50, 50), (x, y), int(14 * scale))
             cheese_surface = pygame.Surface((int(36 * scale), int(36 * scale)), pygame.SRCALPHA)
             pygame.draw.circle(cheese_surface, (255, 230, 120, alpha), (int(18 * scale), int(18 * scale)), int(11 * scale))
@@ -636,6 +658,12 @@ class GameView:
             for dx, dy in [(-6, -4), (4, 0), (0, 6), (7, 5), (-7, 3)]:
                 pygame.draw.circle(self.screen, (180, 40, 40), (int(x + dx * scale), int(y + dy * scale)), int(3 * scale))
                 pygame.draw.circle(self.screen, (220, 90, 90), (int(x + dx * scale + 1), int(y + dy * scale - 1)), int(2 * scale))
+        else:
+            # Pizza non cuite (juste les ingrédients posés)
+            pygame.draw.circle(self.screen, (220, 60, 60), (x, y), int(14 * scale)) # Sauce
+            pygame.draw.circle(self.screen, (255, 255, 180), (x, y), int(12 * scale)) # Fromage non fondu
+            for dx, dy in [(-6, -4), (4, 0), (0, 6)]:
+                pygame.draw.circle(self.screen, (190, 50, 50), (int(x + dx * scale), int(y + dy * scale)), int(3 * scale))
     
     def _draw_item(self, item, x, y, alpha=255, scale=1.0):
         chopped = getattr(item, 'chopped', False)
@@ -655,6 +683,8 @@ class GameView:
             self._draw_burger(x, y, alpha, scale)
         elif item.item_type == ItemType.CHEESE:
             self._draw_cheese(x, y, alpha, scale)
+        elif item.item_type == ItemType.UNCOOKED_PIZZA:
+            self._draw_pizza(x, y, finished=False, alpha=alpha, scale=scale)
         elif item.item_type == ItemType.PIZZA:
             self._draw_pizza(x, y, finished=True, alpha=alpha, scale=scale)
         elif item.item_type == ItemType.SALAD:

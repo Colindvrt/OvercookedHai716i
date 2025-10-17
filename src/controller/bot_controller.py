@@ -45,14 +45,21 @@ RECIPES = {
     ),
     ItemType.PIZZA: Recipe(
         name="Pizza",
-        result=ItemType.PIZZA,
+        result=ItemType.UNCOOKED_PIZZA, # MODIFICATION: Le résultat de l'assemblage est une pizza non cuite
         ingredients=[
-            (ItemType.BREAD, False),      # base de pâte
-            (ItemType.TOMATO, True),      # sauce tomate
-            (ItemType.CHEESE, False),     # fromage
+            (ItemType.BREAD, False),
+            (ItemType.TOMATO, True),
+            (ItemType.CHEESE, False),
         ]
     ),
-    
+    ItemType.SALAD: Recipe(
+        name="Salad",
+        result=ItemType.SALAD,
+        ingredients=[
+            (ItemType.LETTUCE, True),      # salade coupée
+            (ItemType.TOMATO, True),      # tomate coupée
+        ]
+    ),
 }
 
 class AIBot:
@@ -132,7 +139,7 @@ class AIBot:
         }
 
     # ============ ACTION SELECTION (action function) ============
-    def action(self, percepts: Dict) -> None:
+    def action(self, m: GameModel, percepts: Dict) -> None:
         """
         Fonction 'action' : décide de l'action à prendre
         basée sur l'état interne et les percepts
@@ -142,7 +149,7 @@ class AIBot:
             if self.current_order_id not in percepts['active_order_ids']:
                 # Order expired or was completed by someone else - abandon current task
                 print(f"Agent: Commande #{self.current_order_id} expirée/complétée - abandon")
-                self._abandon_current_task(percepts)
+                self._abandon_current_task(m, percepts)
                 return
         
         # Mettre à jour l'état interne basé sur les percepts
@@ -162,7 +169,7 @@ class AIBot:
                 self.current_order = None
                 self.current_order_id = None
 
-    def _abandon_current_task(self, percepts: Dict):
+    def _abandon_current_task(self, m: GameModel, percepts: Dict):
         """Abandonne la tâche actuelle et nettoie l'état"""
         self.queue.clear()
         self.internal_state = AgentState.IDLE
@@ -170,8 +177,9 @@ class AIBot:
         self.current_order = None
         self.current_order_id = None
         
-        # If holding something that's not for any active order, consider dropping it
-        # For now, just reset state and let the agent pick a new order
+        # Si le bot tient un objet, planifie de le poser
+        if self._p(m).held_item:
+            self._clear_hands(m)
 
     def _update_internal_state(self, percepts: Dict):
         """Fonction 'next' : met à jour l'état interne"""
@@ -179,12 +187,12 @@ class AIBot:
         assembly = percepts['assembly_state']
         
         # Si on tient l'item final, passer en mode livraison
-        if held and self.current_recipe and held.item_type == self.current_recipe.result:
+        if held and self.current_order and held.item_type == self.current_order.items_needed[0]:
             self.internal_state = AgentState.DELIVERING
         
         # Si la recette est terminée sur l'assemblage
-        elif assembly['finished_item'] and self.current_recipe and \
-             assembly['finished_item'].item_type == self.current_recipe.result:
+        elif assembly['finished_item'] and self.current_order and \
+             assembly['finished_item'].item_type == self.current_order.items_needed[0]:
             self.internal_state = AgentState.DELIVERING
 
     def _select_order(self, percepts: Dict):
@@ -204,6 +212,11 @@ class AIBot:
                 self.current_recipe = RECIPES[needed_item]
                 self.internal_state = AgentState.EXECUTING_RECIPE
                 print(f"Agent: Nouvelle commande #{self.current_order_id} - {self.current_recipe.name}")
+            elif needed_item == ItemType.PIZZA: # Cas spécial pour la pizza qui demande une pizza cuite
+                self.current_recipe = RECIPES[ItemType.UNCOOKED_PIZZA]
+                self.internal_state = AgentState.EXECUTING_RECIPE
+                print(f"Agent: Nouvelle commande #{self.current_order_id} - Pizza")
+
 
     # ============ HELPERS ============
     def _p(self, m: GameModel) -> Player:
@@ -251,6 +264,18 @@ class AIBot:
         for b in self._stations(m, StationType.CUTTING_BOARD):
             if b.item and b.item.item_type == it and bool(b.item.chopped) == chopped:
                 return b
+        return None
+        
+    def _free_furnace(self, m: GameModel) -> Optional[Station]:
+        for s in self._stations(m, StationType.FURNACE):
+            if s.item is None:
+                return s
+        return self._one(m, StationType.FURNACE) # Retourne le premier trouvé s'il n'y en a pas de libre
+
+    def _furnace_with(self, m: GameModel, it: ItemType) -> Optional[Station]:
+        for s in self._stations(m, StationType.FURNACE):
+            if s.item and s.item.item_type == it:
+                return s
         return None
 
     def _anchor(self, s: Station) -> Tuple[int, int]:
@@ -330,104 +355,73 @@ class AIBot:
 
     def _plan_from_model(self, m: GameModel):
         """Planification basée sur la recette active"""
-        if not self.current_recipe:
+        if not self.current_recipe or not self.current_order:
             return
-        
-        # Check if order still exists before planning
-        if self.current_order_id is not None:
-            order_exists = any(o.id == self.current_order_id for o in m.orders)
-            if not order_exists:
-                # Order expired, abandon
-                self._abandon_current_task({'active_order_ids': [o.id for o in m.orders]})
-                return
-        
+
+        # Vérifie si la commande existe toujours
+        if self.current_order_id not in [o.id for o in m.orders]:
+            self._abandon_current_task(m, {'active_order_ids': [o.id for o in m.orders]})
+            return
+
         p = self._p(m)
         a = self._assembly(m)
         d = self._delivery(m)
         
-        recipe = self.current_recipe
-        
-        # Si on tient l'item final, livrer
-        if p.held_item and p.held_item.item_type == recipe.result:
+        # Le plat final demandé par la commande (ex: PIZZA)
+        final_dish_type = self.current_order.items_needed[0]
+
+        # --- Étape 1: Logique de livraison ---
+        # Si on tient le plat final, on livre.
+        if p.held_item and p.held_item.item_type == final_dish_type:
             self._push_with_gap(Step.GO_TO, d)
             self._push_with_gap(Step.INTERACT, d)
             return
-        
-        # IMPORTANT: Check if the dish is already completed on assembly station
-        # This allows reusing dishes from expired orders
-        if a.item and a.item.item_type == recipe.result:
-            # Check if it's overcooked - if so, we need to discard it
-            is_overcooked = getattr(a.item, 'overcooked', False)
-            if is_overcooked:
-                # Clear the overcooked item from assembly (simulating throwing it away)
-                # Take it and put it back to clear it
-                if p.held_item is None:
-                    self._push_with_gap(Step.GO_TO, a)
-                    self._push_with_gap(Step.INTERACT, a)
-                    # Now we're holding the overcooked item - put it back on assembly to "dispose" it
-                    self._push_with_gap(Step.INTERACT, a)
-                    print("🗑️ Chef disposing of overcooked dish")
-                return
+
+        # Si le plat final est prêt sur une station (four ou assemblage)
+        ready_dish_station = self._furnace_with(m, final_dish_type) or \
+                             (a if a.item and a.item.item_type == final_dish_type else None)
+        if ready_dish_station:
+            if p.held_item is None:
+                self._push_with_gap(Step.GO_TO, ready_dish_station)
+                self._push_with_gap(Step.INTERACT, ready_dish_station)
             else:
-                # Dish is ready and good quality - pick it up and deliver
-                if p.held_item is None:
-                    self._push_with_gap(Step.GO_TO, a)
-                    self._push_with_gap(Step.INTERACT, a)
-                self._push_with_gap(Step.GO_TO, d)
-                self._push_with_gap(Step.INTERACT, d)
-                print(f"♻️ Chef reusing completed {recipe.result.value} from previous order")
-                return
-        
-        # Premier ingrédient : doit être le pain (base)
-        first_ingredient = recipe.ingredients[0][0]
-        if not a.contents:
-            # Rien sur l'assemblage, commencer par le premier ingrédient
-            if p.held_item and p.held_item.item_type == first_ingredient:
-                # On tient déjà le premier ingrédient, le poser
+                self._clear_hands(m) # Libère les mains pour prendre le plat
+            return
+
+        # --- Étape 2: Logique de cuisson (pour la pizza) ---
+        uncooked_pizza_station = self._furnace_with(m, ItemType.UNCOOKED_PIZZA)
+        if p.held_item and p.held_item.item_type == ItemType.UNCOOKED_PIZZA:
+            furnace = self._free_furnace(m)
+            if furnace:
+                self._push_with_gap(Step.GO_TO, furnace)
+                self._push_with_gap(Step.INTERACT, furnace)
+            return
+        if a.item and a.item.item_type == ItemType.UNCOOKED_PIZZA:
+            if p.held_item is None:
                 self._push_with_gap(Step.GO_TO, a)
-                self._push_with_gap(Step.INTERACT, a)
-                return
-            elif p.held_item is None:
-                # Aller chercher le premier ingrédient
-                spawn = self._spawn(m, first_ingredient)
-                if spawn:
-                    self._push_with_gap(Step.GO_TO, spawn)
-                    self._push_with_gap(Step.INTERACT, spawn)
-                    self._push_with_gap(Step.GO_TO, a)
-                    self._push_with_gap(Step.INTERACT, a)
-                return
+                self._push_with_gap(Step.INTERACT, a) # La prend
             else:
-                # On tient autre chose, le poser
-                self._clear_hands(m)
-                return
-        
-        # Suivre l'ordre des ingrédients de la recette
-        for ingredient_type, needs_chopping in recipe.ingredients:
-            # Cas spécial : RAW_PATTY devient COOKED_PATTY
-            if ingredient_type == ItemType.RAW_PATTY:
-                if self._assembly_has(m, ItemType.COOKED_PATTY):
-                    continue  # Déjà présent
-            else:
-                # Vérifier si cet ingrédient est déjà sur l'assemblage
-                if needs_chopping:
-                    if self._assembly_has(m, ingredient_type, chopped=True):
-                        continue  # Déjà présent et coupé
-                else:
-                    if self._assembly_has(m, ingredient_type):
-                        continue  # Déjà présent
+                self._clear_hands(m) # Libère les mains
+            return
+        if uncooked_pizza_station and uncooked_pizza_station.cooking_start_time > 0:
+            self._push_with_gap(Step.GO_TO, uncooked_pizza_station)
+            self._push(Step.WAIT, None, 1.0) # Attend une seconde
+            return
+
+        # --- Étape 3: Logique d'assemblage des ingrédients ---
+        for ingredient_type, needs_chopping in self.current_recipe.ingredients:
+            effective_ingredient = ItemType.COOKED_PATTY if ingredient_type == ItemType.RAW_PATTY else ingredient_type
             
-            # Cet ingrédient manque, le préparer
+            if self._assembly_has(m, effective_ingredient, chopped=needs_chopping if needs_chopping else None):
+                continue
+
             self._plan_ingredient(m, ingredient_type, needs_chopping)
-            return  # Une seule étape à la fois
-        
-        # Tous les ingrédients sont là, attendre l'assemblage automatique
-        if p.held_item is None:
-            self._push_with_gap(Step.GO_TO, a)
-            self._push(Step.WAIT, None, self._step_gap)
+            return
+
+        if p.held_item is not None:
+            self._clear_hands(m)
         else:
-            # On tient encore quelque chose, le poser
-            self._push_with_gap(Step.GO_TO, a)
-            self._push_with_gap(Step.INTERACT, a)
+            self._push(Step.WAIT, None, self._step_gap)
 
     def _plan_ingredient(self, m: GameModel, ingredient: ItemType, needs_chopping: bool):
         """Planifie la préparation d'un ingrédient spécifique"""
@@ -600,7 +594,7 @@ class AIBot:
         percepts = self.perceive(m)
         
         # ACTION SELECTION
-        self.action(percepts)
+        self.action(m, percepts)
         
         # Planification si nécessaire
         if self.internal_state == AgentState.EXECUTING_RECIPE and not self.queue:
