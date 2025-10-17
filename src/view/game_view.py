@@ -568,9 +568,7 @@ class GameView:
                 # Time remaining text
                 time_text = self.small_font.render(f"{int(order.time_remaining)}s", True, (255, 255, 255))
                 self.screen.blit(time_text, (bar_x + bar_w - 35, bar_y - 2))
-        
-        
-    
+
     def _draw_tomato(self, x, y, chopped=False, alpha=255, scale=1.0):
         radius = int(9 * scale)
         if chopped:
