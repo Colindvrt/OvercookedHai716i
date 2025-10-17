@@ -569,26 +569,7 @@ class GameView:
                 time_text = self.small_font.render(f"{int(order.time_remaining)}s", True, (255, 255, 255))
                 self.screen.blit(time_text, (bar_x + bar_w - 35, bar_y - 2))
         
-        # --- Controls Panel - Bottom Right (Reste inchangé) ---
-        controls_w, controls_h = 240, 115
-        s = pygame.Surface((controls_w, controls_h), pygame.SRCALPHA)
-        s.fill((30, 30, 40, 200))
-        self.screen.blit(s, (self.width - controls_w - 15, self.height - controls_h - 15))
-        pygame.draw.rect(self.screen, (100, 200, 255), 
-                        pygame.Rect(self.width - controls_w - 15, self.height - controls_h - 15, 
-                                  controls_w, controls_h), 3, border_radius=8)
         
-        controls = [
-            "SPACE: Pick/Place",
-            "C: Chop", 
-            "Arrows: Move",
-            "B: Toggle Bot",
-            "ESC: Quit"
-        ]
-        
-        for i, text in enumerate(controls):
-            text_surface = self.small_font.render(text, True, (255, 255, 255))
-            self.screen.blit(text_surface, (self.width - controls_w, self.height - controls_h + i * 21))
     
     def _draw_tomato(self, x, y, chopped=False, alpha=255, scale=1.0):
         radius = int(9 * scale)
