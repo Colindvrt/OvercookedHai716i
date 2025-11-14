@@ -58,7 +58,10 @@ class Order:
 
 class GameModel:
     def __init__(self):
-        self.players: List[Player] = [Player(100, 100)]
+        self.players: List[Player] = [
+            Player(100, 100),  # Bot 1
+            Player(200, 100)   # Bot 2
+        ]
         self.stations: List[Station] = []
         self.orders: List[Order] = []
         self.score = 0
