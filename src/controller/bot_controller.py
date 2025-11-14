@@ -201,72 +201,87 @@ class AIBot:
 
     def _select_order(self, percepts: Dict):
         """Sélectionne une commande à traiter avec coordination"""
-        orders = percepts['active_orders']
-        if not orders:
-            return
-        
-        if self.shared_knowledge:
-            # Récupérer les commandes déjà prises
-            claimed_orders = set()
-            for msg in self.shared_knowledge.messages:
-                if msg['type'] == 'order_claimed' and msg['sender'] != self.player_index:
-                    claimed_orders.add(msg['data'].get('order_id'))
-            
-            # Trouver une commande non réclamée
-            available_orders = [o for o in orders if o.id not in claimed_orders]
-            
-            if available_orders:
-                # Prendre la plus urgente parmi les disponibles
-                self.current_order = min(available_orders, key=lambda o: o.time_remaining)
-            else:
-                # Si toutes sont prises, prendre la plus urgente (fallback)
-                self.current_order = min(orders, key=lambda o: o.time_remaining)
-            
-            self.current_order_id = self.current_order.id
-            
-            # ✅ ANNONCER qu'on prend cette commande
-            self.shared_knowledge.send_message(
-                self.player_index,
-                'order_claimed',
-                {'order_id': self.current_order_id}
-            )
-            print(f"🎯 Agent {self.player_index} réclame la commande #{self.current_order_id}")
-        else:
-            # Fallback sans coordination
+        if not self.shared_knowledge:
+            # Fallback (ancienne logique)
+            orders = percepts['active_orders']
+            if not orders: return
             self.current_order = min(orders, key=lambda o: o.time_remaining)
             self.current_order_id = self.current_order.id
+        else:
+            self.shared_knowledge.update_orders(percepts['active_orders'])
+
+            # --- BOT 0 (PREP) ---
+            if self.player_index == 0:
+                unclaimed_orders = self.shared_knowledge.get_unclaimed_orders()
+
+                # Si sa commande actuelle est toujours valide, il la garde
+                if self.current_order_id and self.current_order_id in [o.id for o in unclaimed_orders]:
+                     pass # Garde sa commande
+                elif self.current_order_id and self.current_order_id in [o.id for o in self.shared_knowledge.current_orders]:
+                     pass # Garde sa commande (même si réclamée, c'est par lui)
+                else:
+                    # Sinon, il prend une nouvelle commande
+                    if not unclaimed_orders:
+                        self.internal_state = AgentState.IDLE
+                        self.current_order = None
+                        self.current_order_id = None
+                        return
+
+                    target_order = min(unclaimed_orders, key=lambda o: o.time_remaining)
+                    
+                    if self.shared_knowledge.claim_order(target_order.id, self.player_index):
+                        self.current_order = target_order
+                        self.current_order_id = target_order.id
+                    else:
+                        self.internal_state = AgentState.IDLE
+                        return
+                
+                # Si, après tout ça, il n'a pas de commande, il sort
+                if not self.current_order:
+                    self.internal_state = AgentState.IDLE
+                    return
+                
+                print(f"🎯 Agent {self.player_index} (Prep) réclame la commande #{self.current_order_id}")
+
+            # --- BOT 1 (ASSEMBLER) ---
+            elif self.player_index == 1:
+                # ✅ Bot 1 ne réclame pas. Il vérifie juste s'il y a du travail.
+                if percepts['active_orders']:
+                    self.internal_state = AgentState.EXECUTING_RECIPE
+                    # Il n'a pas de "current_order", il les traite toutes dans _plan_from_model
+                    self.current_order = None 
+                    self.current_order_id = None
+                    self.current_recipe = None
+                else:
+                    self.internal_state = AgentState.IDLE
+                return # Bot 1 a fini sa sélection
         
-        # Identifier la recette et DÉCLARER les ingrédients nécessaires
+        # --- (Suite pour Bot 0 uniquement) ---
+        if not self.current_order:
+            self.internal_state = AgentState.IDLE
+            return
+        
+        # Identifier la recette (concerne Bot 0)
         if self.current_order and self.current_order.items_needed:
             needed_item = self.current_order.items_needed[0]
-            if needed_item in RECIPES:
-                self.current_recipe = RECIPES[needed_item]
-                self.internal_state = AgentState.EXECUTING_RECIPE
+            
+            # ✅ C'EST ICI QUE 'recipe_key' EST DÉFINI !
+            recipe_key = ItemType.PIZZA if needed_item == ItemType.PIZZA else needed_item
+
+            if recipe_key in RECIPES:
+                self.current_recipe = RECIPES[recipe_key]
+                self.internal_state = AgentState.EXECUTING_RECIPE # ✅ CORRECTION: Bot 0 démarre
                 print(f"Agent {self.player_index}: Nouvelle commande #{self.current_order_id} - {self.current_recipe.name}")
                 
-                # ✅ DÉCLARER tous les ingrédients nécessaires AVEC L'ID DE LA COMMANDE
                 if self.shared_knowledge:
                     for ingredient, needs_chopping in self.current_recipe.ingredients:
                         needs_cooking = (ingredient == ItemType.RAW_PATTY)
-                        # Créer une clé unique : ingredient_orderid
-                        unique_key = f"{ingredient.value}_{self.current_order_id}"
                         self.shared_knowledge.request_ingredient(
                             ingredient, 
                             needs_chopping=needs_chopping,
                             needs_cooking=needs_cooking,
-                            agent_id=self.player_index
-                        )
-            elif needed_item == ItemType.PIZZA:
-                self.current_recipe = RECIPES[ItemType.PIZZA]
-                self.internal_state = AgentState.EXECUTING_RECIPE
-                print(f"Agent {self.player_index}: Nouvelle commande #{self.current_order_id} - Pizza")
-                
-                if self.shared_knowledge:
-                    for ingredient, needs_chopping in self.current_recipe.ingredients:
-                        self.shared_knowledge.request_ingredient(
-                            ingredient,
-                            needs_chopping=needs_chopping,
-                            agent_id=self.player_index
+                            agent_id=self.player_index,
+                            order_id=self.current_order_id # Lie l'ingrédient à la commande
                         )
 
 
@@ -398,83 +413,83 @@ class AIBot:
     # ============ PLANIFICATION DE RECETTE ============
     def _plan_from_model(self, m: GameModel):
         """Planification basée sur la recette active ET LES RÔLES FIXES"""
-        if not self.current_recipe or not self.current_order:
-            return
-
-        # Vérifie si la commande existe toujours
-        if self.current_order_id not in [o.id for o in m.orders]:
-            self._abandon_current_task(m, {'active_order_ids': [o.id for o in m.orders]})
-            return
-
         p = self._p(m)
         a = self._assembly(m)
         d = self._delivery(m)
-        
-        final_dish_type = self.current_order.items_needed[0]
-        bot1_player = m.players[1] # ✅ Référence au Bot 1
 
         # --- RÔLE 1: BOT 0 (PREP CHEF) ---
         if self.player_index == 0:
             
-            # ✅ VERIFICATION DE SUR-PREPARATION (Problème 1)
-            # On vérifie si le plat est déjà assemblé OU tenu par Bot 1 OU en cuisson
+            # On vérifie d'abord s'il a une commande
+            if not self.current_recipe or not self.current_order:
+                self._push(Step.WAIT, None, self._step_gap)
+                return
+            
+            # Vérifie si la commande existe toujours
+            if self.current_order_id not in [o.id for o in m.orders]:
+                self._abandon_current_task(m, {'active_order_ids': [o.id for o in m.orders]})
+                return
+            
+            bot1_player = m.players[1] # Référence au Bot 1
+            final_dish_type = self.current_order.items_needed[0] # Le plat final de SA commande
+            
+            # --- (Début de la logique de prépa du Bot 0) ---
+            
             is_dish_being_handled = False
             if a.item and (
                 a.item.item_type == self.current_recipe.result or
                 a.item.item_type == final_dish_type
             ):
-                is_dish_being_handled = True # Plat assemblé sur la table
+                is_dish_being_handled = True
             
             if bot1_player.held_item and (
                 bot1_player.held_item.item_type == self.current_recipe.result or
                 bot1_player.held_item.item_type == final_dish_type
             ):
-                is_dish_being_handled = True # Bot 1 tient le plat (ex: UNCOOKED_PIZZA)
+                is_dish_being_handled = True
             
             if final_dish_type == ItemType.PIZZA:
                 if self._furnace_with(m, ItemType.UNCOOKED_PIZZA) or self._furnace_with(m, ItemType.PIZZA):
-                    is_dish_being_handled = True # Pizza au four
+                    is_dish_being_handled = True
             
             if is_dish_being_handled:
-                print(f"Agent {self.player_index}: Plat déjà assemblé/pris en charge par Bot 1. J'attends.")
+                print(f"Agent {self.player_index}: Plat déjà assemblé/pris en charge. J'attends.")
                 self._push(Step.WAIT, None, self._step_gap * 2)
                 return
 
-            # Si mains pleines, vider les mains
             if p.held_item:
-                if p.held_item.chopped or p.held_item.item_type == ItemType.COOKED_PATTY:
-                    
-                    if p.held_item.item_type == ItemType.COOKED_PATTY:
-                         # Le steak cuit RESTE sur le four. On le repose si on le tient.
-                         stove = self._free_stove(m)
-                         if stove:
-                             self._push_with_gap(Step.GO_TO, stove)
-                             self._push_with_gap(Step.INTERACT, stove)
-                         return
-                    else: 
-                         # ✅ CORRECTIF CONFLIT (Problème 2/3)
-                         # Tomate/Salade coupée: ON POSE SUR UNE PLANCHE LIBRE, JAMAIS L'ASSEMBLAGE
-                         board = self._free_board(m)
-                         if board:
-                             self._push_with_gap(Step.GO_TO, board)
-                             self._push_with_gap(Step.INTERACT, board)
-                             print(f"Agent {self.player_index}: Laisse {p.held_item.item_type.value} coupé sur la planche.")
-                         else:
-                             # TOUTES LES PLANCHES SONT PLEINES. ON ATTEND.
-                             print(f"Agent {self.player_index}: Tient {p.held_item.item_type.value} coupé, mais pas de planche libre. J'attends.")
-                             self._push(Step.WAIT, None, self._step_gap)
-                         return
+                if (p.held_item.item_type in [ItemType.TOMATO, ItemType.LETTUCE] and not p.held_item.chopped):
+                    board = self._free_board(m)
+                    if board:
+                        self._push_with_gap(Step.GO_TO, board)
+                        self._push_with_gap(Step.INTERACT, board)
+                        self._push_with_gap(Step.CHOP, board)
+                    else:
+                        self._push(Step.WAIT, None, 0.5)
+                    return
                 
-                else: # On tient un item non préparé, on continue la prépa
-                     is_choppable = p.held_item.item_type in [ItemType.TOMATO, ItemType.LETTUCE]
-                     self._plan_ingredient(m, p.held_item.item_type, is_choppable)
-                     return
+                elif p.held_item.item_type == ItemType.RAW_PATTY:
+                    stove = self._free_stove(m)
+                    if stove:
+                        self._push_with_gap(Step.GO_TO, stove)
+                        self._push_with_gap(Step.INTERACT, stove)
+                    else:
+                        self._push(Step.WAIT, None, 0.5)
+                    return
+                
+                else:
+                    board = self._free_board(m)
+                    if board:
+                        self._push_with_gap(Step.GO_TO, board)
+                        self._push_with_gap(Step.INTERACT, board)
+                    else:
+                        self._push(Step.WAIT, None, 0.5)
+                    return
 
             # Mains vides: chercher une tâche de préparation
             for ingredient_type, needs_chopping in self.current_recipe.ingredients:
                 needs_cooking = (ingredient_type == ItemType.RAW_PATTY)
                 
-                # On ne s'occupe QUE de la prépa
                 if not needs_chopping and not needs_cooking:
                     continue 
                     
@@ -483,13 +498,27 @@ class AIBot:
                     continue
                 
                 if needs_cooking:
-                    if self._stove_with(m, ItemType.COOKED_PATTY) or self._stove_with(m, ItemType.RAW_PATTY):
+                    # ✅ VÉRIFICATION AJOUTÉE: Bot 1 tient-il le steak ?
+                    if bot1_player.held_item and bot1_player.held_item.item_type == ItemType.COOKED_PATTY:
+                        continue 
+                    if (self._stove_with(m, ItemType.COOKED_PATTY) or 
+                        self._stove_with(m, ItemType.RAW_PATTY) or
+                        self._stove_with(m, ItemType.BURNT_PATTY)):
                         continue
+
                 elif needs_chopping:
+                    # ✅ VÉRIFICATION AJOUTÉE: Bot 1 tient-il l'ingrédient coupé ?
+                    if (bot1_player.held_item and 
+                        bot1_player.held_item.item_type == ingredient_type and 
+                        bot1_player.held_item.chopped):
+                        continue
                     if self._board_with(m, ingredient_type, chopped=True) or self._board_with(m, ingredient_type, chopped=False):
                         continue
                 
-                self._plan_ingredient(m, ingredient_type, needs_chopping)
+                spawn = self._spawn(m, ingredient_type)
+                if spawn:
+                    self._push_with_gap(Step.GO_TO, spawn)
+                    self._push_with_gap(Step.INTERACT, spawn)
                 return
             
             self._push(Step.WAIT, None, self._step_gap * 2)
@@ -498,255 +527,89 @@ class AIBot:
         # --- RÔLE 2: BOT 1 (ASSEMBLER / RUNNER) ---
         elif self.player_index == 1:
             
-            # Étape 1: LIVRAISON
-            if p.held_item and p.held_item.item_type == final_dish_type:
-                self._push_with_gap(Step.GO_TO, d)
-                self._push_with_gap(Step.INTERACT, d)
-                return
-
-            ready_dish_station = self._furnace_with(m, final_dish_type) or \
-                                (a if a.item and a.item.item_type == final_dish_type else None)
-            if ready_dish_station:
-                if p.held_item is None:
-                    self._push_with_gap(Step.GO_TO, ready_dish_station)
-                    self._push_with_gap(Step.INTERACT, ready_dish_station)
-                else:
-                    # ✅ CORRECTIF CONFLIT (Problème 2/3): Utilise la nouvelle fonction
-                    self._place_held_item_on_assembly(m)
-                return
-
-            # Étape 2: Cuisson PIZZA
-            if final_dish_type == ItemType.PIZZA:
-                uncooked_pizza_station = self._furnace_with(m, ItemType.UNCOOKED_PIZZA)
-                if p.held_item and p.held_item.item_type == ItemType.UNCOOKED_PIZZA:
-                    furnace = self._free_furnace(m)
-                    if furnace:
-                        self._push_with_gap(Step.GO_TO, furnace)
-                        self._push_with_gap(Step.INTERACT, furnace)
-                    return
-                if a.item and a.item.item_type == ItemType.UNCOOKED_PIZZA:
-                    if p.held_item is None:
-                        self._push_with_gap(Step.GO_TO, a)
-                        self._push_with_gap(Step.INTERACT, a)
-                    else:
-                        # ✅ CORRECTIF CONFLIT (Problème 2/3): Utilise la nouvelle fonction
-                        self._place_held_item_on_assembly(m)
-                    return
-                if uncooked_pizza_station and uncooked_pizza_station.cooking_start_time > 0:
-                    self._push_with_gap(Step.GO_TO, uncooked_pizza_station)
-                    self._push(Step.WAIT, None, 1.0)
-                    return
-
-            # Étape 3: Assemblage des ingrédients
-            for ingredient_type, needs_chopping in self.current_recipe.ingredients:
-                needs_cooking = (ingredient_type == ItemType.RAW_PATTY)
-                effective_ingredient = ItemType.COOKED_PATTY if needs_cooking else ingredient_type
-                
-                if self._assembly_has(m, effective_ingredient, chopped=needs_chopping if needs_chopping else None):
-                    continue
-                
-                # Bot 1 s'occupe des items SIMPLES (pain, fromage)
-                if not needs_chopping and not needs_cooking:
-                    self._plan_ingredient(m, ingredient_type, needs_chopping)
-                    return
-                
-                # Bot 1 s'occupe de RÉCUPÉRER les items préparés
-                elif p.held_item is None: # Doit avoir les mains vides
-                    ready_station = None
-                    if needs_cooking:
-                        ready_station = self._stove_with(m, ItemType.COOKED_PATTY)
-                    elif needs_chopping:
-                        ready_station = self._board_with(m, ingredient_type, chopped=True)
-                    
-                    if ready_station:
-                        self._push_with_gap(Step.GO_TO, ready_station)
-                        self._push_with_gap(Step.INTERACT, ready_station)
-                        self._push_with_gap(Step.GO_TO, a)
-                        self._push_with_gap(Step.INTERACT, a)
-                        return
-                    else:
-                        continue
-                else:
-                    # ✅ CORRECTIF CONFLIT (Problème 2/3): Utilise la nouvelle fonction
-                    self._place_held_item_on_assembly(m)
-                    return
+            # (La logique du Bot 1 reste inchangée, elle est déjà correcte)
             
-            # Si on arrive ici, on n'a rien à faire
+            for order in m.orders:
+                final_dish_type = order.items_needed[0]
+                recipe_key = ItemType.PIZZA if final_dish_type == ItemType.PIZZA else final_dish_type
+
+                if recipe_key not in RECIPES:
+                    continue 
+                
+                current_recipe = RECIPES[recipe_key] 
+
+                # Étape 1: LIVRAISON
+                if p.held_item and p.held_item.item_type == final_dish_type:
+                    self._push_with_gap(Step.GO_TO, d)
+                    self._push_with_gap(Step.INTERACT, d)
+                    return 
+
+                ready_dish_station = self._furnace_with(m, final_dish_type) or \
+                                    (a if a.item and a.item.item_type == final_dish_type else None)
+                if ready_dish_station:
+                    if p.held_item is None:
+                        self._push_with_gap(Step.GO_TO, ready_dish_station)
+                        self._push_with_gap(Step.INTERACT, ready_dish_station)
+                    else:
+                        self._place_held_item_on_assembly(m)
+                    return 
+
+                # Étape 2: Cuisson PIZZA
+                if final_dish_type == ItemType.PIZZA:
+                    uncooked_pizza_station = self._furnace_with(m, ItemType.UNCOOKED_PIZZA)
+                    if p.held_item and p.held_item.item_type == ItemType.UNCOOKED_PIZZA:
+                        furnace = self._free_furnace(m)
+                        if furnace:
+                            self._push_with_gap(Step.GO_TO, furnace)
+                            self._push_with_gap(Step.INTERACT, furnace)
+                        return 
+                    if a.item and a.item.item_type == ItemType.UNCOOKED_PIZZA:
+                        if p.held_item is None:
+                            self._push_with_gap(Step.GO_TO, a)
+                            self._push_with_gap(Step.INTERACT, a)
+                        else:
+                            self._place_held_item_on_assembly(m)
+                        return 
+                    if uncooked_pizza_station and uncooked_pizza_station.cooking_start_time > 0:
+                        self._push_with_gap(Step.GO_TO, uncooked_pizza_station)
+                        self._push(Step.WAIT, None, 1.0)
+                        return 
+
+                # Étape 3: Assemblage des ingrédients
+                for ingredient_type, needs_chopping in current_recipe.ingredients:
+                    needs_cooking = (ingredient_type == ItemType.RAW_PATTY)
+                    effective_ingredient = ItemType.COOKED_PATTY if needs_cooking else ingredient_type
+                    
+                    if self._assembly_has(m, effective_ingredient, chopped=needs_chopping if needs_chopping else None):
+                        continue
+                    
+                    if not needs_chopping and not needs_cooking:
+                        self._plan_ingredient(m, ingredient_type, needs_chopping)
+                        return 
+                    
+                    elif p.held_item is None:
+                        ready_station = None
+                        if needs_cooking:
+                            ready_station = self._stove_with(m, ItemType.COOKED_PATTY)
+                        elif needs_chopping:
+                            ready_station = self._board_with(m, ingredient_type, chopped=True)
+                        
+                        if ready_station:
+                            self._push_with_gap(Step.GO_TO, ready_station)
+                            self._push_with_gap(Step.INTERACT, ready_station)
+                            self._push_with_gap(Step.GO_TO, a)
+                            self._push_with_gap(Step.INTERACT, a)
+                            return 
+                        else:
+                            continue 
+                    else:
+                        self._place_held_item_on_assembly(m)
+                        return 
+            
             if p.held_item is not None:
-                # ✅ CORRECTIF CONFLIT (Problème 2/3): Utilise la nouvelle fonction
                 self._place_held_item_on_assembly(m)
             else:
                 self._push(Step.WAIT, None, self._step_gap * 2)
-
-    def _plan_ingredient(self, m: GameModel, ingredient: ItemType, needs_chopping: bool):
-        """Planifie la préparation d'un ingrédient spécifique"""
-        p = self._p(m)
-        a = self._assembly(m)
-
-        # ✅ VÉRIFIER si on peut claim cet ingrédient
-        if self.shared_knowledge:
-            ing_status = self.shared_knowledge.get_ingredient_status(ingredient)
-            
-            # Si l'ingrédient n'est pas encore réclamé ou est réclamé par nous
-            if ing_status in [None, IngredientStatus.NEEDED]:
-                if not self.shared_knowledge.claim_ingredient_preparation(ingredient, self.player_index):
-                    print(f"Agent {self.player_index}: {ingredient.value} déjà réclamé par un autre agent")
-                    self._push(Step.WAIT, None, 0.5)
-                    return
-            elif ing_status == IngredientStatus.IN_PREPARATION:
-                ing_info = self.shared_knowledge.ingredients.get(ingredient)
-                if ing_info and ing_info.claimed_by != self.player_index:
-                    # Un autre agent s'en occupe, ne rien faire
-                    print(f"Agent {self.player_index}: {ingredient.value} en préparation par agent {ing_info.claimed_by}")
-                    return
-        
-        # Cas spécial: RAW_PATTY doit être cuit
-        needs_cooking = (ingredient == ItemType.RAW_PATTY)
-        cooked_version = ItemType.COOKED_PATTY if needs_cooking else ingredient
-        
-        # Si on tient déjà l'ingrédient préparé
-        if p.held_item and p.held_item.item_type == cooked_version:
-            if needs_chopping and not p.held_item.chopped:
-                # Doit être coupé
-                board = self._free_board(m)
-                if board:
-                    self._push_with_gap(Step.GO_TO, board)
-                    self._push_with_gap(Step.INTERACT, board)
-                    self._push_with_gap(Step.CHOP, board)
-                    self._push_with_gap(Step.INTERACT, board)
-                    # ✅ MARQUER COMME PRÊT après découpe
-                    if self.shared_knowledge:
-                        self.shared_knowledge.mark_ingredient_ready(ingredient, board, self.player_index)
-                    self._push_with_gap(Step.GO_TO, a)
-                    self._push_with_gap(Step.INTERACT, a)
-            else:
-                # Prêt à poser sur l'assemblage
-                self._push_with_gap(Step.GO_TO, a)
-                self._push_with_gap(Step.INTERACT, a)
-                # ✅ MARQUER COMME PRÊT après dépôt sur assemblage
-                if self.shared_knowledge:
-                    self.shared_knowledge.mark_ingredient_ready(cooked_version, a, self.player_index)
-            return
-        
-        # Si on tient le bon ingrédient mais non préparé
-        if p.held_item and p.held_item.item_type == ingredient:
-            if needs_chopping and not p.held_item.chopped:
-                board = self._free_board(m)
-                if board:
-                    self._push_with_gap(Step.GO_TO, board)
-                    self._push_with_gap(Step.INTERACT, board)
-                    self._push_with_gap(Step.CHOP, board)
-                    self._push_with_gap(Step.INTERACT, board)
-                    # ✅ MARQUER COMME PRÊT après découpe
-                    if self.shared_knowledge:
-                        self.shared_knowledge.mark_ingredient_ready(ingredient, board, self.player_index)
-                    self._push_with_gap(Step.GO_TO, a)
-                    self._push_with_gap(Step.INTERACT, a)
-                return
-        
-        # Si mains vides
-        if p.held_item is None:
-            # Chercher si l'ingrédient est déjà préparé quelque part
-            if needs_cooking:
-                # Chercher steak cuit
-                stove_cooked = self._stove_with(m, ItemType.COOKED_PATTY)
-                if stove_cooked:
-                    self._push_with_gap(Step.GO_TO, stove_cooked)
-                    self._push_with_gap(Step.INTERACT, stove_cooked)
-                    # ✅ MARQUER COMME PRÊT après avoir pris le steak cuit
-                    if self.shared_knowledge:
-                        self.shared_knowledge.mark_ingredient_ready(ItemType.COOKED_PATTY, stove_cooked, self.player_index)
-                    self._push_with_gap(Step.GO_TO, a)
-                    self._push_with_gap(Step.INTERACT, a)
-                    return
-                
-                # Chercher steak en cuisson
-                stove_raw = self._stove_with(m, ItemType.RAW_PATTY)
-                if stove_raw and stove_raw.cooking_start_time > 0:
-                    self._push_with_gap(Step.GO_TO, stove_raw)
-                    remaining = max(0.0, stove_raw.cooking_duration - (time.time() - stove_raw.cooking_start_time))
-                    self._push(Step.WAIT, None, min(0.5, remaining))
-                    # ✅ MARQUER COMME PRÊT quand la cuisson est terminée
-                    if remaining <= 0.1 and self.shared_knowledge:
-                        self.shared_knowledge.mark_ingredient_ready(ItemType.COOKED_PATTY, stove_raw, self.player_index)
-                    return
-                
-                # Commencer la cuisson
-                spawn = self._spawn(m, ItemType.RAW_PATTY)
-                stove = self._free_stove(m)
-                if spawn and stove:
-                    self._push_with_gap(Step.GO_TO, spawn)
-                    self._push_with_gap(Step.INTERACT, spawn)
-                    self._push_with_gap(Step.GO_TO, stove)
-                    self._push_with_gap(Step.INTERACT, stove)
-                    # Note: Le steak sera marqué prêt plus tard quand il sera cuit
-                return
-            
-            if needs_chopping:
-                # Chercher ingrédient déjà coupé
-                ready = self._board_with(m, ingredient, chopped=True)
-                if ready:
-                    self._push_with_gap(Step.GO_TO, ready)
-                    self._push_with_gap(Step.INTERACT, ready)
-                    # ✅ MARQUER COMME PRÊT après avoir pris l'ingrédient coupé
-                    if self.shared_knowledge:
-                        self.shared_knowledge.mark_ingredient_ready(ingredient, ready, self.player_index)
-                    self._push_with_gap(Step.GO_TO, a)
-                    self._push_with_gap(Step.INTERACT, a)
-                    return
-                
-                # Commencer à préparer
-                spawn = self._spawn(m, ingredient)
-                board = self._free_board(m)
-                if spawn and board:
-                    self._push_with_gap(Step.GO_TO, spawn)
-                    self._push_with_gap(Step.INTERACT, spawn)
-                    self._push_with_gap(Step.GO_TO, board)
-                    self._push_with_gap(Step.INTERACT, board)
-                    self._push_with_gap(Step.CHOP, board)
-                    self._push_with_gap(Step.INTERACT, board)
-                    # ✅ MARQUER COMME PRÊT après découpe
-                    if self.shared_knowledge:
-                        self.shared_knowledge.mark_ingredient_ready(ingredient, board, self.player_index)
-                    self._push_with_gap(Step.GO_TO, a)
-                    self._push_with_gap(Step.INTERACT, a)
-                return
-            
-            # Ingrédient simple (pas de préparation)
-            spawn = self._spawn(m, ingredient)
-            if spawn:
-                self._push_with_gap(Step.GO_TO, spawn)
-                self._push_with_gap(Step.INTERACT, spawn)
-                self._push_with_gap(Step.GO_TO, a)
-                self._push_with_gap(Step.INTERACT, a)
-                # ✅ MARQUER COMME PRÊT après avoir pris l'ingrédient simple
-                if self.shared_knowledge:
-                    self.shared_knowledge.mark_ingredient_ready(ingredient, spawn, self.player_index)
-            return
-        
-        # Si on tient quelque chose d'autre qui n'est pas lié à la recette, le poser
-        if p.held_item:
-            held_type = p.held_item.item_type
-            # Vérifier si ce qu'on tient fait partie de la recette actuelle
-            recipe_ingredients = [ing for ing, _ in self.current_recipe.ingredients] if self.current_recipe else []
-            
-            if held_type not in recipe_ingredients and held_type != ItemType.COOKED_PATTY:
-                # Ce n'est pas pour cette recette, le poser ailleurs
-                if held_type in (ItemType.TOMATO, ItemType.LETTUCE):
-                    board = self._free_board(m)
-                    if board:
-                        self._push_with_gap(Step.GO_TO, board)
-                        self._push_with_gap(Step.INTERACT, board)
-                    return
-                elif held_type == ItemType.RAW_PATTY:
-                    stove = self._free_stove(m)
-                    if stove:
-                        self._push_with_gap(Step.GO_TO, stove)
-                        self._push_with_gap(Step.INTERACT, stove)
-                    return
-            else:
-                # Fait partie de la recette mais pas le bon moment, attendre
-                self._push(Step.WAIT, None, self._step_gap)
 
     def _clear_hands(self, m: GameModel):
         """Libère les mains en posant l'item tenu"""
@@ -867,3 +730,32 @@ class AIBot:
         a = self._assembly(m)
         self._push_with_gap(Step.GO_TO, a)
         self._push_with_gap(Step.INTERACT, a)
+
+    def _plan_ingredient(self, m: GameModel, ingredient_type: ItemType, needs_chopping: bool):
+        """
+        Planifie la récupération d'un ingrédient SIMPLE (non-préparé)
+        et l'amène à l'assemblage.
+        (Utilisé par Bot 1 pour Pain, Fromage)
+        """
+        p = self._p(m)
+        a = self._assembly(m)
+
+        # Si on tient déjà le bon item, on le pose
+        if p.held_item and p.held_item.item_type == ingredient_type:
+            self._push_with_gap(Step.GO_TO, a)
+            self._push_with_gap(Step.INTERACT, a)
+            return
+
+        # Si on tient un mauvais item, on vide les mains (sur l'assemblage)
+        if p.held_item:
+            self._place_held_item_on_assembly(m) # Utilise la fonction correcte
+            return
+
+        # Si on n'a rien, on va chercher l'item
+        spawn = self._spawn(m, ingredient_type)
+        if spawn:
+            self._push_with_gap(Step.GO_TO, spawn)
+            self._push_with_gap(Step.INTERACT, spawn)
+            # Une fois qu'on le tient, on l'amène à l'assemblage
+            self._push_with_gap(Step.GO_TO, a)
+            self._push_with_gap(Step.INTERACT, a)
