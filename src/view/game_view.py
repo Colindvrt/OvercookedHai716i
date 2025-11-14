@@ -530,7 +530,7 @@ class GameView:
                 pygame.draw.rect(self.screen, border_color, (panel_x, panel_y, panel_w, panel_h), 4, border_radius=10)
                 
                 # Order number and item
-                order_num_text = self.font.render(f"Order #{i+1}", True, (200, 200, 200))
+                order_num_text = self.font.render(f"Order #{order.id}", True, (200, 200, 200))
                 self.screen.blit(order_num_text, (panel_x + 15, panel_y + 12))
                 
                 # Item icon (larger and clearer)

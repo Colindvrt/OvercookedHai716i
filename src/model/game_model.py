@@ -64,7 +64,7 @@ class GameModel:
         self.score = 0
         self.game_time = 300.0
         self.start_time = None  # Will be set when first order arrives
-        self.next_order_id = 0  # Track order IDs
+        self.next_order_id = 1  # Track order IDs
         self.completed_orders = []  # Track recently completed orders
         self.next_order_time = time.time() + 3.0  # First order in 3 seconds
         self.game_started = False  # Track if game has started
