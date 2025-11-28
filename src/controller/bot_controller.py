@@ -41,46 +41,37 @@ class AIBot:
         elif task.task_type == TaskType.COOK:
             target_item = ItemType.COOKED_PATTY if task.item_type == ItemType.RAW_PATTY else ItemType.PIZZA
             return p.held_item is not None and p.held_item.item_type == target_item
-
-        # Dans src/controller/bot_controller.py -> _check_task_completion
         
         elif task.task_type == TaskType.PLACE:
             if p.held_item is not None: return False 
             assembly = self._assembly(m)
             if assembly:
-                # 1. On vérifie si l'ingrédient est visible dans la liste (cas normal)
                 for item in assembly.contents:
                     if item.item_type == task.item_type:
                         if task.needs_chopping and not item.chopped: continue
                         return True
                 
-                # 2. On vérifie si l'ingrédient est posé seul (rare sur assembly, mais possible)
                 if assembly.item and assembly.item.item_type == task.item_type:
                     return True
 
-                # 3. ✅ CORRECTION : On vérifie si l'ingrédient a été TRANSFORMÉ en plat final
                 if assembly.item:
                     it = assembly.item.item_type
-                    # Si je vois une Pizza Crue, c'est que le pain, la tomate et le fromage sont bien là
                     if it == ItemType.UNCOOKED_PIZZA:
                         if task.item_type in [ItemType.BREAD, ItemType.TOMATO, ItemType.CHEESE]: return True
                     
-                    # Pareil pour le Burger
                     elif it == ItemType.BURGER:
                         if task.item_type in [ItemType.BREAD, ItemType.COOKED_PATTY, ItemType.TOMATO, ItemType.LETTUCE]: return True
                     
-                    # Pareil pour la Salade
                     elif it == ItemType.SALAD:
                         if task.item_type in [ItemType.LETTUCE, ItemType.TOMATO]: return True
 
             return False
 
-        # ✅ LIVRAISON : Fini seulement si la commande a disparu !
         elif task.task_type == TaskType.DELIVER:
             for order in m.orders:
                 if order.id == task.order_id:
-                    return False # Commande encore active -> Pas fini
-            return True # Commande disparue -> Livrée
+                    return False
+            return True
 
         return False
     
@@ -150,33 +141,29 @@ class AIBot:
                         self.queue.clear()
                         self._clear_hands(m)
 
-        # 🟢 REMPLACE-LE PAR CECI :
-        if not self.current_task:
-            # On regarde ce que le bot tient
-            p = m.players[self.player_index]
-            held_type = p.held_item.item_type if p.held_item else None
-            
-            # On demande une tâche en précisant l'objet tenu
-            # (Nécessite la modif dans SharedKnowledge faite juste avant)
-            next_task = self.shared_knowledge.get_next_task(self.player_index, held_item_type=held_type)
-            
-            if next_task:
-                self.shared_knowledge.claim_task(next_task, self.player_index)
-                self.current_task = next_task
-            
-            # SI on tient un objet MAIS qu'on n'a pas trouvé de tâche pour lui (bloqué par une dépendance)
-            # ALORS on pose l'objet pour se libérer
-            elif held_type is not None and not self.queue:
-                self._clear_hands(m)
-        
+        # 🔥 FIX : Libérer la tâche actuelle si elle est complétée (sinon on reste bloqué dessus)
         if self.current_task:
             if self._check_task_completion(m, self.current_task):
                 self.shared_knowledge.complete_task(self.current_task, self.player_index)
                 self.current_task = None
                 self.queue.clear()
-            else:
-                if not self.queue:
-                    self._execute_task(m, self.current_task)
+
+        # Chercher une nouvelle tâche si nécessaire
+        if not self.current_task:
+            p = m.players[self.player_index]
+            held_type = p.held_item.item_type if p.held_item else None
+            
+            next_task = self.shared_knowledge.get_next_task(self.player_index, held_item_type=held_type)
+            
+            if next_task:
+                self.shared_knowledge.claim_task(next_task, self.player_index)
+                self.current_task = next_task
+            elif held_type is not None and not self.queue:
+                self._clear_hands(m)
+        
+        # Exécuter la tâche actuelle
+        if self.current_task and not self.queue:
+            self._execute_task(m, self.current_task)
 
         if not self.queue: return
         step, station, deadline = self.queue[0]
@@ -235,9 +222,15 @@ class AIBot:
             elif task.target_station_type == StationType.ASSEMBLY:
                 s = self._assembly(m)
                 if s and s.item and s.item.item_type == task.item_type:
-                    if p.held_item: self._clear_hands(m)
+                    # 🔥 IMPORTANT : Se débarrasser de ce qu'on tient AVANT
+                    if p.held_item:
+                        self._clear_hands(m)
+                        return
                     self._push(Step.GO_TO, s)
                     self._push(Step.INTERACT, s)
+                else:
+                    # Pizza pas encore assemblée, on attend
+                    self._push(Step.WAIT, None, 0.5)
 
         elif task.task_type == TaskType.CHOP:
             if p.held_item and p.held_item.chopped: return
@@ -293,20 +286,20 @@ class AIBot:
                             self._push(Step.INTERACT, furnace)
                         else: self._push(Step.WAIT, None, 0.5)
                     else: self._push(Step.WAIT, None, 0.5)
+                else:
+                    # 🔥 Si on n'a pas la pizza crue en main, on attend qu'elle soit assemblée
+                    self._push(Step.WAIT, None, 0.5)
 
         elif task.task_type == TaskType.PLACE:
             p = m.players[self.player_index]
             
-            # --- VÉRIFICATION : AI-JE L'OBJET EN MAIN ? ---
             has_item = False
             if p.held_item and p.held_item.item_type == task.item_type:
-                # Si c'est une tomate/salade, on vérifie qu'elle est bien coupée
                 if task.needs_chopping:
                     if p.held_item.chopped: has_item = True
                 else:
                     has_item = True
             
-            # CAS 1 : J'ai l'objet -> Je vais le poser (Comportement normal)
             if has_item:
                 assembly = self._assembly(m)
                 if assembly:
@@ -315,31 +308,23 @@ class AIBot:
                         self._push(Step.GO_TO, assembly)
                         self._push(Step.INTERACT, assembly)
                     else: self._push(Step.WAIT, None, 0.5)
-
-            # CAS 2 : Je n'ai PAS l'objet (je l'ai posé avant) -> Je vais le chercher !
             else:
-                # On cherche où on a posé l'objet
                 target_station = self._find_station_with_item(m, task.item_type, task.needs_chopping)
                 
                 if target_station:
-                     # On va le récupérer
                      if self.shared_knowledge.reserve_station(target_station, self.player_index):
                         self._push(Step.GO_TO, target_station)
                         self._push(Step.INTERACT, target_station)
                      else:
                         self._push(Step.WAIT, None, 0.5)
                 else:
-                     # L'objet est introuvable (peut-être pris par l'autre bot ?)
-                     # On attend un peu pour retenter
                      self._push(Step.WAIT, None, 0.5)
 
         elif task.task_type == TaskType.DELIVER:
             delivery = self._delivery(m)
-            # Si j'ai le plat, je livre
             if p.held_item and p.held_item.item_type == task.item_type:
                 self._push(Step.GO_TO, delivery)
                 self._push(Step.INTERACT, delivery)
-            # Sinon, je vais le chercher
             else:
                 assembly = self._assembly(m)
                 if assembly and assembly.item and assembly.item.item_type == task.item_type:
@@ -362,14 +347,10 @@ class AIBot:
             self._push(Step.INTERACT, s)
         
     def _find_station_with_item(self, m: GameModel, item_type: ItemType, needs_chopping: bool) -> Optional[Station]:
-        """Cherche une station (table/planche) qui contient l'objet désiré."""
         for s in m.stations:
-            # On regarde si la station a un item
             if s.item and s.item.item_type == item_type:
-                # Si l'objet doit être coupé (tomate/salade), on vérifie qu'il l'est bien
                 if needs_chopping and not s.item.chopped:
                     continue
-                # On vérifie que la station est accessible (pas bloquée par un autre bot)
                 if self.shared_knowledge.is_station_available(s, self.player_index):
                     return s
         return None
