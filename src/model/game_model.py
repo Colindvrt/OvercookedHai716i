@@ -87,10 +87,9 @@ class GameModel:
             self.stations.append(Station((i + 1) * step_spawn, 100, StationType.INGREDIENT_SPAWN, ingredient_type=ing_type))
         
         nb_bots = len(self.players)
-        # Formule : 1 bot -> 1 station, 10 bots -> 5 stations
-        # On utilise une division entière arrondie vers le haut grosso modo
-        nb_service = max(1, int((nb_bots + 1) / 2))
-        nb_service = min(nb_service, 5) # Plafond à 5
+        # ✅ NOUVELLE FORMULE : 2 bots -> 2 stations, 10+ bots -> 5 stations (max)
+        # 1 station par bot jusqu'à un maximum de 5 stations
+        nb_service = min(5, max(1, nb_bots))
         
         # 2. STATIONS DE TRAVAIL (Milieu)
         row2_types = []
@@ -252,7 +251,7 @@ class GameModel:
     
     def _handle_assembly(self, player: Player, station: Station):
         # 1. Si un plat fini est sur la table, on peut le prendre
-        if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]:
+        if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD, ItemType.UNCOOKED_PIZZA]:
             if not player.held_item:
                 player.held_item = station.item
                 station.item = None
