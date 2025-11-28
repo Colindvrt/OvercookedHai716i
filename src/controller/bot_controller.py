@@ -196,7 +196,7 @@ class AIBot:
         
         # Si la recette est terminée sur l'assemblage
         elif assembly['finished_item'] and self.current_order and \
-             assembly['finished_item'].item_type == self.current_order.items_needed[0]:
+            assembly['finished_item'].item_type == self.current_order.items_needed[0]:
             self.internal_state = AgentState.DELIVERING
 
     def _select_order(self, percepts: Dict):

@@ -391,9 +391,9 @@ class GameView:
                 
                 # Main bubble
                 pygame.draw.ellipse(self.screen, (255, 255, 255), 
-                                  (bubble_x - bubble_w//2, bubble_y - bubble_h//2, bubble_w, bubble_h))
+                                (bubble_x - bubble_w//2, bubble_y - bubble_h//2, bubble_w, bubble_h))
                 pygame.draw.ellipse(self.screen, (200, 200, 200), 
-                                  (bubble_x - bubble_w//2, bubble_y - bubble_h//2, bubble_w, bubble_h), 2)
+                                (bubble_x - bubble_w//2, bubble_y - bubble_h//2, bubble_w, bubble_h), 2)
                 
                 # Small bubble tail
                 pygame.draw.circle(self.screen, (255, 255, 255), (x - 10, y - 35), 6)
