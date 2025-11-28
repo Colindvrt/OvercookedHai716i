@@ -45,7 +45,7 @@ class Station:
     item: Optional[Item] = None
     cooking_start_time: float = 0.0
     cooking_duration: float = 3.0
-    overcook_duration: float = 5.0
+    overcook_duration: float = 20.0
     ingredient_type: Optional[ItemType] = None
     contents: List[Item] = field(default_factory=list)
 
