@@ -5,12 +5,11 @@ from typing import List
 from src.model.game_model import GameModel, ItemType, StationType
 
 class GameView:
-    def __init__(self, width: int = 1000, height: int = 700):  # Increased size
+    def __init__(self, width: int = 1000, height: int = 700):
         
         info = pygame.display.Info()
         self.width = info.current_w
         self.height = info.current_h
-        
         
         self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         
@@ -26,14 +25,15 @@ class GameView:
             'chef_uniform': (255, 255, 255), 'chef_hat': (255, 255, 255), 'chef_eyes': (50, 50, 50),
             'stove_base': (50, 50, 60), 'stove_top': (70, 70, 80), 'fire': (255, 100, 0),
             'cutting_board': (205, 133, 63), 'metal': (192, 192, 192), 'shadow': (0, 0, 0, 60),
-            'furnace': (20, 20, 20), 
+            'furnace': (20, 20, 20),
+            'holding': (180, 180, 180), # ✅ AJOUTÉ : Couleur du rack
         }
         
         self.font = pygame.font.Font(None, 28)
         self.small_font = pygame.font.Font(None, 20)
         self.large_font = pygame.font.Font(None, 42)
         self.animation_time = 0
-        self.customers = {}  # Dict with order ID as key
+        self.customers = {}
         self.customer_spawn_timer = 0
     
     def render(self, model: GameModel):
@@ -44,25 +44,21 @@ class GameView:
         self._draw_enhanced_stations(model.stations)
         self._update_customers(model)
         self._draw_customers()
-        self._draw_players(model.players)
+        self._draw_players(model.players) # ✅ Modifié pour passer l'index
         self._draw_modern_ui(model)
         self._draw_particle_effects(model.stations)
         pygame.display.flip()
     
     def _draw_floor(self):
         tile_size = 50
-        # Only draw floor in play area
         for x in range(0, self.width, tile_size):
-            for y in range(0, 450, tile_size):  # Stop before customer area
+            for y in range(0, 450, tile_size):
                 color = (240, 235, 216) if (x // tile_size + y // tile_size) % 2 == 0 else (235, 230, 211)
                 pygame.draw.rect(self.screen, color, (x, y, tile_size, tile_size))
                 pygame.draw.rect(self.screen, (200, 195, 176), (x, y, tile_size, tile_size), 1)
         
-        # Customer counter area - wooden counter look
         pygame.draw.rect(self.screen, (139, 90, 43), (0, 450, self.width, 250))
-        # Counter top edge
         pygame.draw.rect(self.screen, (160, 110, 60), (0, 450, self.width, 15))
-        # Add some wood texture lines
         for i in range(5, self.width, 40):
             pygame.draw.line(self.screen, (120, 75, 35), (i, 460), (i, self.height), 1)
     
@@ -78,19 +74,41 @@ class GameView:
             for y in range(10, wall_height - 10, tile_size):
                 pygame.draw.rect(self.screen, (118, 127, 135), (x, y, tile_size-2, tile_size-2))
     
+    # Dans src/view/game_view.py
+
     def _draw_counters(self, stations):
-        for cx, cy, cw, ch in [(80, 140, 500, 80), (620, 140, 150, 80)]:
-            shadow = pygame.Surface((cw + 10, ch + 10), pygame.SRCALPHA)
+        """Dessine dynamiquement un plan de travail sous chaque station (sauf les spawns)"""
+        counter_w, counter_h = 70, 70  # Taille d'un bloc de comptoir
+        
+        for station in stations:
+            # On ne dessine pas de table sous les spawns (ils sont au mur)
+            if station.station_type == StationType.INGREDIENT_SPAWN:
+                continue
+                
+            # Coordonnées du coin haut-gauche du comptoir (centré sur la station)
+            cx = station.x - counter_w // 2
+            cy = station.y - counter_h // 2
+            
+            # 1. Ombre portée
+            shadow = pygame.Surface((counter_w + 6, counter_h + 6), pygame.SRCALPHA)
             shadow.fill((0, 0, 0, 40))
             self.screen.blit(shadow, (cx + 5, cy + 5))
-            pygame.draw.rect(self.screen, self.COLORS['counter'], (cx, cy, cw, ch))
-            pygame.draw.rect(self.screen, self.COLORS['counter_top'], (cx, cy, cw, 15))
-            for i in range(3):
-                pygame.draw.line(self.screen, (150, 92, 55), (cx + 10, cy + 5 + i * 3), (cx + cw - 10, cy + 5 + i * 3), 1)
-            drawer_y = cy + 30
-            pygame.draw.rect(self.screen, (120, 60, 10), (cx + 20, drawer_y, cw - 40, 35))
-            pygame.draw.rect(self.screen, (100, 50, 5), (cx + 20, drawer_y, cw - 40, 35), 2)
-            pygame.draw.circle(self.screen, (180, 180, 180), (cx + cw // 2, drawer_y + 17), 4)
+            
+            # 2. Corps du comptoir
+            pygame.draw.rect(self.screen, self.COLORS['counter'], (cx, cy, counter_w, counter_h), border_radius=5)
+            
+            # 3. Dessus du comptoir (bordure claire)
+            pygame.draw.rect(self.screen, self.COLORS['counter_top'], (cx, cy, counter_w, 15), border_top_left_radius=5, border_top_right_radius=5)
+            
+            # 4. Détails (Lignes bois)
+            for i in range(1, 4):
+                line_y = cy + 15 + i * 15
+                if line_y < cy + counter_h:
+                    pygame.draw.line(self.screen, (120, 60, 20), (cx + 5, line_y), (cx + counter_w - 5, line_y), 1)
+            
+            # 5. Tiroir (Décoration)
+            pygame.draw.rect(self.screen, (100, 50, 10), (cx + 10, cy + 25, counter_w - 20, 20))
+            pygame.draw.circle(self.screen, (180, 180, 180), (cx + counter_w // 2, cy + 35), 3)
     
     def _draw_enhanced_stations(self, stations):
         for station in stations:
@@ -106,6 +124,9 @@ class GameView:
                 self._draw_delivery_station(station)
             elif station.station_type == StationType.INGREDIENT_SPAWN:
                 self._draw_ingredient_spawn(station)
+            # ✅ AJOUTÉ : Dessiner la nouvelle station
+            elif station.station_type == StationType.HOLDING:
+                self._draw_holding_station(station)
     
     def _draw_stove(self, station):
         x, y = station.x, station.y
@@ -139,11 +160,8 @@ class GameView:
 
     def _draw_furnace(self, station):
         x, y = station.x, station.y
-        # Carré noir simple
         pygame.draw.rect(self.screen, self.COLORS['furnace'], (x - 30, y - 25, 60, 50), border_radius=5)
         pygame.draw.rect(self.screen, (50, 50, 50), (x - 30, y - 25, 60, 50), 3, border_radius=5)
-        
-        # Porte du four
         pygame.draw.rect(self.screen, (40, 40, 40), (x - 25, y - 20, 50, 30))
         
         if station.item:
@@ -220,6 +238,50 @@ class GameView:
             text_surface = self.small_font.render(label_text, True, (100, 100, 100))
             self.screen.blit(text_surface, text_surface.get_rect(center=(x, y + 35)))
     
+    # ✅ AJOUTÉ : Nouvelle fonction pour dessiner la station de maintien
+    def _draw_holding_station(self, station):
+        x, y = station.x, station.y
+        # Design simple de rack en métal
+        shadow = pygame.Surface((70, 50), pygame.SRCALPHA)
+        shadow.fill((0, 0, 0, 40))
+        self.screen.blit(shadow, (x - 32, y - 22))
+        pygame.draw.rect(self.screen, self.COLORS['holding'], (x - 30, y - 20, 60, 40), border_radius=4)
+        pygame.draw.rect(self.screen, (150, 150, 150), (x - 30, y - 20, 60, 40), 2, border_radius=4)
+        
+        # Barres du rack
+        for i in range(3):
+            pygame.draw.line(self.screen, (160, 160, 160), (x - 25, y - 10 + i * 10), (x + 25, y - 10 + i * 10), 3)
+        
+        if station.item:
+            self._draw_item(station.item, x, y - 5)
+            
+            # Logique de la barre d'expiration
+            if station.cooking_start_time > 0 and not station.item.overcooked:
+                progress = (time.time() - station.cooking_start_time) / station.cooking_duration
+                progress = min(1.0, max(0.0, progress))
+                time_left_ratio = 1.0 - progress
+                
+                bar_width, bar_height = 50, 8
+                bar_x, bar_y = x - bar_width // 2, y + 25
+                
+                pygame.draw.rect(self.screen, (50, 50, 50), (bar_x, bar_y, bar_width, bar_height), border_radius=4)
+                
+                # Couleur (Vert -> Jaune -> Rouge)
+                if time_left_ratio > 0.5:
+                    bar_color = (0, 255, 100)
+                elif time_left_ratio > 0.25:
+                    bar_color = (255, 200, 0)
+                else:
+                    bar_color = (255, 50, 50)
+                
+                pygame.draw.rect(self.screen, bar_color, (bar_x + 2, bar_y + 2, int((bar_width - 4) * time_left_ratio), bar_height - 4), border_radius=3)
+            
+            # Marquer si périmé
+            elif station.item.overcooked:
+                text_surface = self.large_font.render("X", True, (255, 0, 0))
+                rect = text_surface.get_rect(center=(x, y))
+                self.screen.blit(text_surface, rect)
+
     def _draw_particle_effects(self, stations):
         for station in stations:
             if (station.station_type == StationType.STOVE and station.item and 
@@ -234,7 +296,6 @@ class GameView:
                         self.screen.blit(steam, (int(station.x + offset - 10), int(y_pos)))
     
     def _update_customers(self, model):
-        # Remove customers for completed/expired orders
         for order_id in list(self.customers.keys()):
             if order_id not in [o.id for o in model.orders]:
                 completed_info = next((c for c in model.completed_orders if c['id'] == order_id), None)
@@ -252,20 +313,18 @@ class GameView:
                     if order_id in self.customers:
                         del self.customers[order_id]
         
-        # Calculate spacing for customers based on the current number of orders
         num_orders = len(model.orders)
-        available_width = self.width - 300  # Leave margins
+        available_width = self.width - 300
         spacing = min(250, available_width // max(num_orders, 1)) if num_orders > 0 else 250
         start_x = 150
 
-        # Add new customers for new orders
         for idx, order in enumerate(model.orders):
             if order.id not in self.customers:
                 target_x = start_x + idx * spacing
                 self.customers[order.id] = {
                     'x': self.width + 50, 
                     'target_x': target_x, 
-                    'y': 550,  # Fixed y position in customer area
+                    'y': 550,
                     'waiting': False,
                     'leaving': False, 
                     'animation_offset': 0, 
@@ -274,7 +333,6 @@ class GameView:
                     'order_index': idx
                 }
         
-        # Update customer positions and expressions
         for order_id, customer in list(self.customers.items()):
             if not customer['leaving']:
                 order_idx = next((i for i, o in enumerate(model.orders) if o.id == order_id), -1)
@@ -288,7 +346,6 @@ class GameView:
                     if order_id in self.customers:
                         del self.customers[order_id]
             elif not customer['waiting']:
-                # Move towards target position
                 if abs(customer['x'] - customer['target_x']) > 5:
                     if customer['x'] > customer['target_x']:
                         customer['x'] -= 3
@@ -300,7 +357,6 @@ class GameView:
             
             customer['animation_offset'] = math.sin(self.animation_time + order_id) * 2
             
-            # Update expression based on order time
             if not customer['leaving'] and order_id in [o.id for o in model.orders]:
                 order = next((o for o in model.orders if o.id == order_id), None)
                 if order:
@@ -317,122 +373,90 @@ class GameView:
             expression = customer.get('expression', 'waiting')
             order_type = customer.get('order_type')
             
-            # Better customer body - rounded with clothing details
-            # Legs
             pygame.draw.rect(self.screen, (50, 50, 100), (x - 8, y + 15, 6, 20), border_radius=3)
             pygame.draw.rect(self.screen, (50, 50, 100), (x + 2, y + 15, 6, 20), border_radius=3)
-            # Shoes
             pygame.draw.ellipse(self.screen, (40, 40, 40), (x - 10, y + 33, 8, 6))
             pygame.draw.ellipse(self.screen, (40, 40, 40), (x + 2, y + 33, 8, 6))
-            
-            # Body - shirt
             pygame.draw.ellipse(self.screen, (100, 150, 200), (x - 15, y - 5, 30, 25))
-            # Collar
             pygame.draw.line(self.screen, (80, 120, 160), (x - 5, y - 3), (x - 10, y + 5), 2)
             pygame.draw.line(self.screen, (80, 120, 160), (x + 5, y - 3), (x + 10, y + 5), 2)
-            
-            # Arms
             pygame.draw.rect(self.screen, (255, 220, 177), (x - 20, y, 8, 15), border_radius=4)
             pygame.draw.rect(self.screen, (255, 220, 177), (x + 12, y, 8, 15), border_radius=4)
             pygame.draw.ellipse(self.screen, (255, 210, 167), (x - 22, y + 12, 10, 8))
             pygame.draw.ellipse(self.screen, (255, 210, 167), (x + 12, y + 12, 10, 8))
-            
-            # Neck
             pygame.draw.rect(self.screen, (255, 220, 177), (x - 4, y - 8, 8, 6))
-            
-            # Head
             pygame.draw.circle(self.screen, (255, 220, 177), (x, y - 15), 14)
-            
-            # Hair
             pygame.draw.arc(self.screen, (80, 50, 30), (x - 14, y - 28, 28, 20), 0, 3.14, 3)
-            
-            # Eyes
             pygame.draw.circle(self.screen, (255, 255, 255), (x - 5, y - 17), 4)
             pygame.draw.circle(self.screen, (255, 255, 255), (x + 5, y - 17), 4)
             pygame.draw.circle(self.screen, (50, 50, 50), (x - 5, y - 16), 3)
             pygame.draw.circle(self.screen, (50, 50, 50), (x + 5, y - 16), 3)
             
-            # Eyebrows and mouth based on expression
             if expression == 'angry' or expression == 'overcooked':
-                # Angry eyebrows
                 pygame.draw.line(self.screen, (50, 50, 50), (x - 8, y - 21), (x - 2, y - 23), 2)
                 pygame.draw.line(self.screen, (50, 50, 50), (x + 2, y - 23), (x + 8, y - 21), 2)
-                # Frown
                 pygame.draw.arc(self.screen, (50, 50, 50), (x - 6, y - 8, 12, 8), 3.14, 6.28, 2)
             elif expression == 'worried':
-                # Worried eyebrows
                 pygame.draw.line(self.screen, (50, 50, 50), (x - 8, y - 22), (x - 2, y - 21), 2)
                 pygame.draw.line(self.screen, (50, 50, 50), (x + 2, y - 21), (x + 8, y - 22), 2)
-                # Straight mouth
                 pygame.draw.line(self.screen, (50, 50, 50), (x - 5, y - 9), (x + 5, y - 9), 2)
             elif expression == 'happy':
-                # Happy eyebrows
                 pygame.draw.arc(self.screen, (50, 50, 50), (x - 8, y - 24, 6, 4), 0, 3.14, 2)
                 pygame.draw.arc(self.screen, (50, 50, 50), (x + 2, y - 24, 6, 4), 0, 3.14, 2)
-                # Big smile
                 pygame.draw.arc(self.screen, (50, 50, 50), (x - 7, y - 14, 14, 10), 0, 3.14, 2)
-            else:  # waiting
-                # Normal eyebrows
+            else:
                 pygame.draw.arc(self.screen, (50, 50, 50), (x - 8, y - 23, 6, 4), 0, 3.14, 1)
                 pygame.draw.arc(self.screen, (50, 50, 50), (x + 2, y - 23, 6, 4), 0, 3.14, 1)
-                # Slight smile
                 pygame.draw.arc(self.screen, (50, 50, 50), (x - 5, y - 13, 10, 6), 0, 3.14, 2)
             
-            # Speech bubble with order
             if not customer['leaving'] and order_type and customer['waiting']:
-                # Draw speech bubble
                 bubble_x, bubble_y = x, y - 60
                 bubble_w, bubble_h = 70, 50
-                
-                # Bubble shadow
                 shadow = pygame.Surface((bubble_w + 5, bubble_h + 5), pygame.SRCALPHA)
                 shadow.fill((0, 0, 0, 40))
                 self.screen.blit(shadow, (bubble_x - bubble_w//2 + 2, bubble_y - bubble_h//2 + 2))
-                
-                # Main bubble
-                pygame.draw.ellipse(self.screen, (255, 255, 255), 
-                                  (bubble_x - bubble_w//2, bubble_y - bubble_h//2, bubble_w, bubble_h))
-                pygame.draw.ellipse(self.screen, (200, 200, 200), 
-                                  (bubble_x - bubble_w//2, bubble_y - bubble_h//2, bubble_w, bubble_h), 2)
-                
-                # Small bubble tail
+                pygame.draw.ellipse(self.screen, (255, 255, 255), (bubble_x - bubble_w//2, bubble_y - bubble_h//2, bubble_w, bubble_h))
+                pygame.draw.ellipse(self.screen, (200, 200, 200), (bubble_x - bubble_w//2, bubble_y - bubble_h//2, bubble_w, bubble_h), 2)
                 pygame.draw.circle(self.screen, (255, 255, 255), (x - 10, y - 35), 6)
                 pygame.draw.circle(self.screen, (200, 200, 200), (x - 10, y - 35), 6, 2)
                 pygame.draw.circle(self.screen, (255, 255, 255), (x - 5, y - 42), 4)
                 pygame.draw.circle(self.screen, (200, 200, 200), (x - 5, y - 42), 4, 1)
                 
-                # Draw the order item in bubble
                 item_dummy = type('Item', (), {'item_type': order_type, 'chopped': False})()
                 self._draw_item(item_dummy, bubble_x, bubble_y - 5, scale=1.2)
                 
-                # "One X please" text
-                order_names = {
-                    ItemType.BURGER: "Burger",
-                    ItemType.PIZZA: "Pizza",
-                    ItemType.SALAD: "Salad"
-                }
+                order_names = { ItemType.BURGER: "Burger", ItemType.PIZZA: "Pizza", ItemType.SALAD: "Salad" }
                 order_text = order_names.get(order_type, "Order")
                 text_surface = self.small_font.render(order_text, True, (50, 50, 50))
                 self.screen.blit(text_surface, text_surface.get_rect(center=(bubble_x, bubble_y + 15)))
             
-            # Show "OVERCOOKED!" message if leaving angry due to overcooked food
             if customer['leaving'] and expression == 'overcooked':
                 text_surface = self.font.render("OVERCOOKED!", True, (255, 50, 50))
                 self.screen.blit(text_surface, text_surface.get_rect(center=(x, y - 80)))
     
-    def _draw_chef_character(self, x, y):
+    # ✅ MODIFIÉ : Ajout de player_index
+    def _draw_chef_character(self, x, y, player_index=0):
         shadow = pygame.Surface((40, 10), pygame.SRCALPHA)
         pygame.draw.ellipse(shadow, (0, 0, 0, 60), (0, 0, 40, 10))
         self.screen.blit(shadow, (x - 20, y + 25))
         pygame.draw.rect(self.screen, (50, 50, 50), (x - 8, y + 10, 6, 18), border_radius=3)
         pygame.draw.rect(self.screen, (50, 50, 50), (x + 2, y + 10, 6, 18), border_radius=3)
+        
+        # ✅ AJOUTÉ : Couleur d'uniforme différente
+        if player_index == 0:
+            uniform_color = self.COLORS['chef_uniform'] # Player 0 (Chef) - Blanc
+        else:
+            uniform_color = (180, 210, 255) # Player 1 (Commis) - Bleu clair
+            
         body_rect = pygame.Rect(x - 14, y - 8, 28, 22)
-        pygame.draw.rect(self.screen, self.COLORS['chef_uniform'], body_rect, border_radius=3)
+        pygame.draw.rect(self.screen, uniform_color, body_rect, border_radius=3) # Utilise uniform_color
         pygame.draw.rect(self.screen, (220, 220, 220), body_rect, 2, border_radius=3)
         for by in [y - 3, y + 3]:
             pygame.draw.circle(self.screen, (255, 215, 0), (x, by), 2)
-        pygame.draw.rect(self.screen, self.COLORS['chef_uniform'], (x - 20, y - 5, 8, 15), border_radius=2)
-        pygame.draw.rect(self.screen, self.COLORS['chef_uniform'], (x + 12, y - 5, 8, 15), border_radius=2)
+        
+        pygame.draw.rect(self.screen, uniform_color, (x - 20, y - 5, 8, 15), border_radius=2) # Utilise uniform_color
+        pygame.draw.rect(self.screen, uniform_color, (x + 12, y - 5, 8, 15), border_radius=2) # Utilise uniform_color
+        
         pygame.draw.circle(self.screen, self.COLORS['chef_skin'], (x - 18, y + 8), 4)
         pygame.draw.circle(self.screen, self.COLORS['chef_skin'], (x + 18, y + 8), 4)
         pygame.draw.circle(self.screen, self.COLORS['chef_skin'], (x, y - 20), 11)
@@ -440,7 +464,6 @@ class GameView:
         pygame.draw.circle(self.screen, (255, 255, 255), (x + 4, y - 21), 3)
         pygame.draw.circle(self.screen, self.COLORS['chef_eyes'], (x - 4, y - 20), 2)
         pygame.draw.circle(self.screen, self.COLORS['chef_eyes'], (x + 4, y - 20), 2)
-        # Better mouth - small smile curve
         pygame.draw.arc(self.screen, (200, 100, 100), (x - 4, y - 17, 8, 5), 0, 3.14, 2)
         pygame.draw.rect(self.screen, self.COLORS['chef_hat'], (x - 12, y - 32, 24, 6), border_radius=2)
         pygame.draw.ellipse(self.screen, self.COLORS['chef_hat'], (x - 10, y - 45, 20, 18))
@@ -448,57 +471,50 @@ class GameView:
         pygame.draw.line(self.screen, (220, 220, 220), (x - 5, y - 42), (x - 3, y - 35), 1)
         pygame.draw.line(self.screen, (220, 220, 220), (x + 5, y - 42), (x + 3, y - 35), 1)
     
+    # ✅ MODIFIÉ : Ajout de enumerate et player_index
     def _draw_players(self, players):
-        for player in players:
-            self._draw_chef_character(player.x, player.y)
+        for idx, player in enumerate(players):
+            self._draw_chef_character(player.x, player.y, player_index=idx)
             if player.held_item:
                 bounce = math.sin(self.animation_time * 3) * 2
                 self._draw_item(player.held_item, player.x, int(player.y - 50 + bounce))
     
     def _draw_modern_ui(self, model):
-        panel_margin = 15 # Marge générale par rapport aux bords
+        panel_margin = 15
         
         # --- SCORE Panel (Bottom Left) ---
         panel_width, score_panel_height = 220, 80
         score_panel_x = panel_margin
-        # Position Y : self.height - hauteur_du_panneau - marge
         score_panel_y = self.height - score_panel_height - panel_margin 
         
-        # Background
         s = pygame.Surface((panel_width, score_panel_height), pygame.SRCALPHA)
         s.fill((30, 30, 40, 200))
         self.screen.blit(s, (score_panel_x, score_panel_y))
         pygame.draw.rect(self.screen, (255, 215, 0), pygame.Rect(score_panel_x, score_panel_y, panel_width, score_panel_height), 3, border_radius=8)
         
-        # Score only
         score_text = self.large_font.render(f"${model.score}", True, (255, 215, 0))
-        # Centre Y : score_panel_y + moitié de la hauteur
         score_rect = score_text.get_rect(center=(score_panel_x + panel_width // 2, score_panel_y + score_panel_height // 2))
         self.screen.blit(score_text, score_rect)
         
         # --- TIMER Panel (Above Score, Bottom Left) ---
         timer_panel_height = 70
         timer_panel_x = panel_margin
-        # Position Y : juste au-dessus du panneau de score, avec une marge
         timer_panel_y = score_panel_y - timer_panel_height - panel_margin 
         
-        # Background
         s = pygame.Surface((panel_width, timer_panel_height), pygame.SRCALPHA)
         s.fill((30, 30, 40, 200))
         self.screen.blit(s, (timer_panel_x, timer_panel_y))
         pygame.draw.rect(self.screen, (100, 200, 255), pygame.Rect(timer_panel_x, timer_panel_y, panel_width, timer_panel_height), 3, border_radius=8)
         
-        # Show timer or "Waiting..." message
         if model.game_started and model.start_time:
             time_remaining = max(0, model.game_time - (time.time() - model.start_time))
             timer_text = self.font.render(f"⏱ {int(time_remaining // 60):02d}:{int(time_remaining % 60):02d}", True, (255, 255, 255))
         else:
             timer_text = self.font.render("Waiting...", True, (150, 150, 150))
-        # Centre Y : timer_panel_y + moitié de la hauteur
         timer_rect = timer_text.get_rect(center=(timer_panel_x + panel_width // 2, timer_panel_y + timer_panel_height // 2))
         self.screen.blit(timer_text, timer_rect)
         
-        # --- Orders Panel - Top Right (Reste inchangé) ---
+        # --- Orders Panel - Top Right ---
         order_names = {
             ItemType.BURGER: ("🍔", "Burger", (255, 200, 100)), 
             ItemType.PIZZA: ("🍕", "Pizza", (255, 180, 50)), 
@@ -514,7 +530,6 @@ class GameView:
             panel_y = 140 + i * 110
             panel_w, panel_h = 260, 100
             
-            # Background with shadow
             shadow = pygame.Surface((panel_w + 5, panel_h + 5), pygame.SRCALPHA)
             shadow.fill((0, 0, 0, 80))
             self.screen.blit(shadow, (panel_x + 3, panel_y + 3))
@@ -529,34 +544,27 @@ class GameView:
                 border_color = (255, 50, 50) if order.time_remaining < 10 else color
                 pygame.draw.rect(self.screen, border_color, (panel_x, panel_y, panel_w, panel_h), 4, border_radius=10)
                 
-                # Order number and item
                 order_num_text = self.font.render(f"Order #{order.id}", True, (200, 200, 200))
                 self.screen.blit(order_num_text, (panel_x + 15, panel_y + 12))
                 
-                # Item icon (larger and clearer)
                 item_dummy = type('Item', (), {'item_type': item_type, 'chopped': False})()
                 self._draw_item(item_dummy, panel_x + 40, panel_y + 55, scale=1.5)
                 
-                # Item name
                 item_name_text = self.font.render(name, True, (255, 255, 255))
                 self.screen.blit(item_name_text, (panel_x + 80, panel_y + 45))
                 
-                # Timer bar
                 time_ratio = max(0, min(1, order.time_remaining / 60.0))
                 bar_x, bar_y = panel_x + 15, panel_y + 75
                 bar_w, bar_h = panel_w - 30, 15
                 
-                # Bar background
                 pygame.draw.rect(self.screen, (50, 50, 50), (bar_x, bar_y, bar_w, bar_h), border_radius=8)
                 
-                # Bar fill with color gradient
                 if time_ratio > 0.5:
                     bar_color = (0, 255, 100)
                 elif time_ratio > 0.25:
                     bar_color = (255, 200, 0)
                 else:
                     bar_color = (255, 50, 50)
-                    # Pulse effect when time is critical
                     if order.time_remaining < 10:
                         pulse = int(abs(math.sin(self.animation_time * 4)) * 50)
                         bar_color = (255, pulse, pulse)
@@ -565,7 +573,6 @@ class GameView:
                                (bar_x + 2, bar_y + 2, int((bar_w - 4) * time_ratio), bar_h - 4), 
                                border_radius=6)
                 
-                # Time remaining text
                 time_text = self.small_font.render(f"{int(order.time_remaining)}s", True, (255, 255, 255))
                 self.screen.blit(time_text, (bar_x + bar_w - 35, bar_y - 2))
 
@@ -643,12 +650,10 @@ class GameView:
     
     def _draw_pizza(self, x, y, finished=True, alpha=255, scale=1.0):
         radius = int(18 * scale)
-        # Pâte
         pygame.draw.circle(self.screen, (240, 200, 140), (x, y), radius)
         pygame.draw.circle(self.screen, (200, 160, 100), (x, y), radius, 1)
 
         if finished:
-            # Pizza cuite (avec fromage fondu et garnitures)
             pygame.draw.circle(self.screen, (200, 50, 50), (x, y), int(14 * scale))
             cheese_surface = pygame.Surface((int(36 * scale), int(36 * scale)), pygame.SRCALPHA)
             pygame.draw.circle(cheese_surface, (255, 230, 120, alpha), (int(18 * scale), int(18 * scale)), int(11 * scale))
@@ -657,9 +662,8 @@ class GameView:
                 pygame.draw.circle(self.screen, (180, 40, 40), (int(x + dx * scale), int(y + dy * scale)), int(3 * scale))
                 pygame.draw.circle(self.screen, (220, 90, 90), (int(x + dx * scale + 1), int(y + dy * scale - 1)), int(2 * scale))
         else:
-            # Pizza non cuite (juste les ingrédients posés)
-            pygame.draw.circle(self.screen, (220, 60, 60), (x, y), int(14 * scale)) # Sauce
-            pygame.draw.circle(self.screen, (255, 255, 180), (x, y), int(12 * scale)) # Fromage non fondu
+            pygame.draw.circle(self.screen, (220, 60, 60), (x, y), int(14 * scale))
+            pygame.draw.circle(self.screen, (255, 255, 180), (x, y), int(12 * scale))
             for dx, dy in [(-6, -4), (4, 0), (0, 6)]:
                 pygame.draw.circle(self.screen, (190, 50, 50), (int(x + dx * scale), int(y + dy * scale)), int(3 * scale))
     

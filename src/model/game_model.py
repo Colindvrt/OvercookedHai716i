@@ -3,6 +3,7 @@ from typing import List, Optional
 from enum import Enum
 import time
 import random
+import pygame
 
 class ItemType(Enum):
     TOMATO = "tomato"
@@ -24,6 +25,7 @@ class StationType(Enum):
     ASSEMBLY = "assembly"
     DELIVERY = "delivery"
     FURNACE = "furnace"
+    HOLDING = "holding"
 
 @dataclass
 class Item:
@@ -33,8 +35,8 @@ class Item:
 
 @dataclass
 class Player:
-    x: int
-    y: int
+    x: float
+    y: float
     held_item: Optional[Item] = None
 
 @dataclass
@@ -45,7 +47,8 @@ class Station:
     item: Optional[Item] = None
     cooking_start_time: float = 0.0
     cooking_duration: float = 3.0
-    overcook_duration: float = 20.0
+    overcook_duration: float = 20
+
     ingredient_type: Optional[ItemType] = None
     contents: List[Item] = field(default_factory=list)
 
@@ -54,55 +57,63 @@ class Order:
     items_needed: List[ItemType]
     time_remaining: float = 60.0
     expired: bool = False
-    id: int = 0  # Add unique ID for tracking
+    id: int = 0
 
 class GameModel:
-    def __init__(self):
+    def __init__(self, num_bots: int = 2):
         self.players: List[Player] = [
-            Player(100, 100),  # Bot 1
-            Player(200, 100)   # Bot 2
+            Player(100 + i * 50, 300) for i in range(num_bots)
         ]
         self.stations: List[Station] = []
         self.orders: List[Order] = []
         self.score = 0
         self.game_time = 300.0
-        self.start_time = None  # Will be set when first order arrives
-        self.next_order_id = 1  # Track order IDs
-        self.completed_orders = []  # Track recently completed orders
-        self.next_order_time = time.time() + 3.0  # First order in 3 seconds
-        self.game_started = False  # Track if game has started
+        self.start_time = None
+        self.next_order_id = 1
+        self.completed_orders = []
+        self.next_order_time = time.time() + 3.0
+        self.game_started = False
         
         self._setup_kitchen()
-        # Don't generate order immediately - wait for timer
     
     def _setup_kitchen(self):
-        """Configuration de la cuisine avec tous les ingrédients"""
-        # Spawn points (ligne du haut)
-        self.stations.extend([
-            Station(100, 100, StationType.INGREDIENT_SPAWN, ingredient_type=ItemType.TOMATO),
-            Station(200, 100, StationType.INGREDIENT_SPAWN, ingredient_type=ItemType.LETTUCE),
-            Station(300, 100, StationType.INGREDIENT_SPAWN, ingredient_type=ItemType.BREAD),
-            Station(400, 100, StationType.INGREDIENT_SPAWN, ingredient_type=ItemType.RAW_PATTY),
-            Station(500, 100, StationType.INGREDIENT_SPAWN, ingredient_type=ItemType.CHEESE),
-        ])
+        """Configuration dynamique : ~1 station pour 2 bots (Max 5)"""
+        self.stations = []
+        width = 1000
         
-        # Stations de travail (ligne du milieu)
-        self.stations.extend([
-            Station(150, 200, StationType.CUTTING_BOARD),
-            Station(250, 200, StationType.CUTTING_BOARD),
-            Station(350, 200, StationType.STOVE),
-            Station(450, 200, StationType.STOVE),
-            Station(550, 200, StationType.FURNACE),
-        ])
+        # 1. SPAWN POINTS (Fixes)
+        spawn_types = [ItemType.TOMATO, ItemType.LETTUCE, ItemType.BREAD, ItemType.RAW_PATTY, ItemType.CHEESE]
+        step_spawn = width // (len(spawn_types) + 1)
+        for i, ing_type in enumerate(spawn_types):
+            self.stations.append(Station((i + 1) * step_spawn, 100, StationType.INGREDIENT_SPAWN, ingredient_type=ing_type))
         
-        # Stations finales
-        self.stations.extend([
-            Station(250, 300, StationType.ASSEMBLY),
-            Station(400, 300, StationType.DELIVERY),
-        ])
-    
+        nb_bots = len(self.players)
+        # ✅ NOUVELLE FORMULE : 2 bots -> 2 stations, 10+ bots -> 5 stations (max)
+        # 1 station par bot jusqu'à un maximum de 5 stations
+        nb_service = min(5, max(1, nb_bots))
+        
+        # 2. STATIONS DE TRAVAIL (Milieu)
+        row2_types = []
+        for _ in range(nb_service): row2_types.append(StationType.CUTTING_BOARD)
+        for _ in range(nb_service): row2_types.append(StationType.STOVE)
+        for _ in range(nb_service): row2_types.append(StationType.FURNACE)
+        
+        step_row2 = width // (len(row2_types) + 1)
+        for i, st_type in enumerate(row2_types):
+            self.stations.append(Station((i + 1) * step_row2, 200, st_type))
+            
+        # 3. ASSEMBLAGE & LIVRAISON (Bas)
+        row3_types = []
+        for _ in range(nb_service): row3_types.append(StationType.ASSEMBLY)
+        row3_types.append(StationType.DELIVERY)
+        row3_types.append(StationType.HOLDING)
+        
+        step_row3 = width // (len(row3_types) + 1)
+        for i, st_type in enumerate(row3_types):
+            duration = 15.0 if st_type == StationType.HOLDING else 3.0
+            self.stations.append(Station((i + 1) * step_row3, 300, st_type, cooking_duration=duration))
+
     def _generate_order(self):
-        """Génère une nouvelle commande aléatoire"""
         if len(self.orders) < 3:
             possible_orders = [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]            
             chosen = random.choice(possible_orders)
@@ -111,29 +122,23 @@ class GameModel:
             self.orders.append(order)
             print(f"Nouvelle commande #{order.id}: {chosen.value.upper()}")
             
-            # Start the game timer when first order arrives
             if not self.game_started:
                 self.game_started = True
                 self.start_time = time.time()
                 print("⏱ Game timer started!")
             
-            # Schedule next order with random delay (between 15-30 seconds)
-            self.next_order_time = time.time() + random.uniform(15.0, 30.0)
+            nb_bots = len(self.players) if len(self.players) > 0 else 1
+            base_delay = 20.0 / nb_bots
+            self.next_order_time = time.time() + random.uniform(base_delay * 0.9, base_delay * 1.1)
     
     def update(self, delta_time: float):
-        """Met à jour le modèle de jeu"""
         current_time = time.time()
-        
-        # Clean up old completed orders
         self.completed_orders = [o for o in self.completed_orders if current_time - o['time'] < 3.0]
         
-        # Check if it's time to generate a new order
         if current_time >= self.next_order_time and len(self.orders) < 3:
             self._generate_order()
         
-        # Only update order timers if game has started
         if self.game_started:
-            # Mise à jour du temps des commandes
             for order in self.orders[:]:
                 if not order.expired:
                     order.time_remaining -= delta_time
@@ -142,80 +147,63 @@ class GameModel:
                         self.score -= 20
                         print(f"⏰ Commande expirée: {order.items_needed[0].value} (-20$)")
                         self.orders.remove(order)
-                        # Mark as expired for animation
-                        self.completed_orders.append({
-                            'id': order.id,
-                            'type': 'expired',
-                            'time': current_time
-                        })
+                        self.completed_orders.append({'id': order.id, 'type': 'expired', 'time': current_time})
         
-        # Mise à jour des stations (cuisson et sur-cuisson)
         for station in self.stations:
-            if (station.station_type in [StationType.STOVE, StationType.FURNACE] and 
-                station.item and
-                station.cooking_start_time > 0):
-                
+            if (station.station_type in [StationType.STOVE, StationType.FURNACE] and station.item and station.cooking_start_time > 0):
                 cooking_time = current_time - station.cooking_start_time
-                
-                # Cuit parfaitement
                 if cooking_time >= station.cooking_duration and cooking_time < station.overcook_duration:
-                    # Logique pour le steak
                     if station.item.item_type == ItemType.RAW_PATTY and station.item.item_type != ItemType.COOKED_PATTY:
                         station.item = Item(ItemType.COOKED_PATTY)
                         print("✅ Steak parfaitement cuit!")
-                    # Logique pour la pizza
                     elif station.item.item_type == ItemType.UNCOOKED_PIZZA and station.item.item_type != ItemType.PIZZA:
                         station.item = Item(ItemType.PIZZA)
                         print("✅ Pizza cuite à la perfection !")
-                
-                # Trop cuit / brûlé
                 elif cooking_time >= station.overcook_duration:
-                    # Logique pour le steak
                     if station.item.item_type != ItemType.BURNT_PATTY and station.station_type == StationType.STOVE:
                         station.item = Item(ItemType.BURNT_PATTY, overcooked=True)
-                        print("🔥 Steak brûlé! (Overcooked)")
                         station.cooking_start_time = 0.0
-                    # Logique pour la pizza (elle peut aussi brûler !)
                     elif station.item.item_type != ItemType.PIZZA and station.station_type == StationType.FURNACE:
-                        station.item = Item(ItemType.PIZZA, overcooked=True) # Une pizza brûlée est une "mauvaise" pizza
-                        print("🔥 Pizza brûlée ! (Overcooked)")
+                        station.item = Item(ItemType.PIZZA, overcooked=True)
                         station.cooking_start_time = 0.0
+            elif (station.station_type == StationType.HOLDING and station.item and not station.item.overcooked and station.cooking_start_time > 0):
+                expire_time = current_time - station.cooking_start_time
+                if expire_time >= station.cooking_duration:
+                    station.item.overcooked = True
 
-    def move_player(self, player_index: int, dx: int, dy: int):
-        """Déplace un joueur"""
+    def move_player(self, player_index: int, dx: float, dy: float, is_smooth: bool = False):
+        """Déplace un joueur (sans collisions avec les tables)"""
         if 0 <= player_index < len(self.players):
             player = self.players[player_index]
-            new_x = max(0, min(750, player.x + dx * 50))
-            new_y = max(0, min(550, player.y + dy * 50))
+            
+            # Distance à parcourir
+            step_x = dx if is_smooth else dx * 50
+            step_y = dy if is_smooth else dy * 50
+            
+            # Limites écran (pour ne pas sortir de la fenêtre)
+            # On garde une petite marge (25px)
+            new_x = max(25, min(975, player.x + step_x))
+            new_y = max(25, min(675, player.y + step_y))
+            
+            # Application directe sans vérifier les obstacles
             player.x = new_x
             player.y = new_y
     
     def interact_with_station(self, player_index: int):
-        """Gère l'interaction joueur-station"""
-        if player_index >= len(self.players):
-            return
-        
+        if player_index >= len(self.players): return
         player = self.players[player_index]
-        
-        # Trouver la station la plus proche
-        closest_station = None
-        min_distance = float('inf')
-        
+        closest, min_dist = None, float('inf')
         for station in self.stations:
-            distance = abs(player.x - station.x) + abs(player.y - station.y)
-            if distance < min_distance and distance <= 70:
-                min_distance = distance
-                closest_station = station
-        
-        if closest_station:
-            self._handle_station_interaction(player, closest_station)
+            dist = abs(player.x - station.x) + abs(player.y - station.y)
+            if dist < min_dist and dist <= 75:
+                min_dist = dist
+                closest = station
+        if closest: self._handle_station_interaction(player, closest)
     
     def _handle_station_interaction(self, player: Player, station: Station):
-        """Gère l'interaction spécifique avec une station"""
         if station.station_type == StationType.INGREDIENT_SPAWN:
             if not player.held_item and station.ingredient_type:
                 player.held_item = Item(station.ingredient_type)
-        
         elif station.station_type == StationType.CUTTING_BOARD:
             if player.held_item and not station.item:
                 if player.held_item.item_type in [ItemType.TOMATO, ItemType.LETTUCE]:
@@ -224,7 +212,6 @@ class GameModel:
             elif station.item and not player.held_item:
                 player.held_item = station.item
                 station.item = None
-        
         elif station.station_type == StationType.STOVE:
             if player.held_item and not station.item:
                 if player.held_item.item_type == ItemType.RAW_PATTY:
@@ -235,7 +222,6 @@ class GameModel:
                 player.held_item = station.item
                 station.item = None
                 station.cooking_start_time = 0.0
-
         elif station.station_type == StationType.FURNACE:
             if player.held_item and not station.item:
                 if player.held_item.item_type == ItemType.UNCOOKED_PIZZA:
@@ -243,166 +229,109 @@ class GameModel:
                     player.held_item = None
                     station.cooking_start_time = time.time()
             elif station.item and not player.held_item:
-                # On ne peut prendre que des pizzas prêtes (cuites ou brûlées)
                 if station.item.item_type == ItemType.PIZZA:
                     player.held_item = station.item
                     station.item = None
                     station.cooking_start_time = 0.0
-        
+        elif station.station_type == StationType.HOLDING:
+            if player.held_item and not station.item:
+                if player.held_item.item_type == ItemType.COOKED_PATTY or \
+                   (player.held_item.item_type in [ItemType.TOMATO, ItemType.LETTUCE] and player.held_item.chopped):
+                    station.item = player.held_item
+                    player.held_item = None
+                    station.cooking_start_time = time.time()
+            elif station.item and not player.held_item:
+                if not station.item.overcooked:
+                    player.held_item = station.item
+                    station.item = None
+                    station.cooking_start_time = 0.0
         elif station.station_type == StationType.ASSEMBLY:
             self._handle_assembly(player, station)
-        
         elif station.station_type == StationType.DELIVERY:
             self._handle_delivery(player)
     
     def _handle_assembly(self, player: Player, station: Station):
-        """Gère l'assemblage multi-recettes"""
-        # Si un plat fini est prêt, le prendre
+        # 1. Si un plat fini est sur la table, on peut le prendre
         if station.item and station.item.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD, ItemType.UNCOOKED_PIZZA]:
             if not player.held_item:
                 player.held_item = station.item
                 station.item = None
-                # Check if overcooked
-                if getattr(player.held_item, 'overcooked', False):
-                    print("⚠️ Picked up overcooked dish - cannot be served!")
             return
         
-        # Si le joueur pose un ingrédient
+        # 2. Si on tient un ingrédient
         if player.held_item:
             held = player.held_item
             
-            # Special case: if holding a finished dish and assembly has contents, dispose of old contents
-            if held.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]:
-                if station.contents:
-                    print("🗑️ Clearing partial ingredients from assembly station")
-                    station.contents.clear()
+            # Ne pas mettre de déchets ou de plats déjà finis dans le mélange
+            if held.item_type in [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD, ItemType.BURNT_PATTY]:
                 return
             
-            # Ne pas accepter de viande brûlée
-            if held.item_type == ItemType.BURNT_PATTY:
-                print("❌ Viande brûlée, impossible de l'utiliser!")
-                return
-            
-            # Ajouter l'ingrédient s'il n'est pas déjà présent
+            # Vérifier si l'ingrédient est déjà présent (pas de doublons)
             if not any(i.item_type == held.item_type for i in station.contents):
-                # Vérifier si l'ingrédient doit être coupé
+                # Légumes doivent être coupés
                 if held.item_type in [ItemType.TOMATO, ItemType.LETTUCE] and not held.chopped:
                     return
                 
+                # On ajoute
                 station.contents.append(held)
                 player.held_item = None
                 
-                # Vérifier si une recette est complète
+                # On vérifie si ça fait une recette
                 self._check_recipe_completion(station)
-        else:
-            # Reprendre le dernier ingrédient (allows salvaging partial work)
-            if station.contents:
-                last = station.contents.pop()
-                player.held_item = last
-                print(f"📦 Picked up {last.item_type.value} from assembly")
     
     def _check_recipe_completion(self, station: Station):
-        """Vérifie si les ingrédients forment un plat complet"""
         types = {item.item_type for item in station.contents}
-        
-        # Vérifier si un item est overcook
         has_overcooked = any(getattr(item, 'overcooked', False) for item in station.contents)
         
-        # Burger: pain + steak cuit + tomate coupée + salade coupée
+        # Burger : Ordre indifférent grâce aux Sets
         if (ItemType.BREAD in types and 
             ItemType.COOKED_PATTY in types and
-            any(i.item_type == ItemType.TOMATO and i.chopped for i in station.contents) and
-            any(i.item_type == ItemType.LETTUCE and i.chopped for i in station.contents)):
-            burger = Item(ItemType.BURGER)
-            burger.overcooked = has_overcooked
-            station.item = burger
+            ItemType.TOMATO in types and # On suppose qu'ils sont coupés car _handle_assembly le vérifie
+            ItemType.LETTUCE in types):
+            
+            station.item = Item(ItemType.BURGER, overcooked=has_overcooked)
             station.contents.clear()
-            if has_overcooked:
-                print("🍔 Burger assemblé (mais trop cuit!)")
-            else:
-                print("🍔 Burger assemblé!")
+            print("🍔 Burger assemblé!")
         
-        # Pizza: pain + tomate coupée + fromage
-        elif (ItemType.BREAD in types and
-              any(i.item_type == ItemType.TOMATO and i.chopped for i in station.contents) and
-              ItemType.CHEESE in types):
-            pizza = Item(ItemType.UNCOOKED_PIZZA) 
-            pizza.overcooked = has_overcooked
-            station.item = pizza
+        # Pizza (Base)
+        elif (ItemType.BREAD in types and ItemType.TOMATO in types and ItemType.CHEESE in types):
+            station.item = Item(ItemType.UNCOOKED_PIZZA, overcooked=has_overcooked)
             station.contents.clear()
             print("🍕 Pizza non cuite assemblée !")
         
-        # Salade: salade coupée + tomate coupée
-        elif (any(i.item_type == ItemType.LETTUCE and i.chopped for i in station.contents) and
-              any(i.item_type == ItemType.TOMATO and i.chopped for i in station.contents) and
-              len(station.contents) == 2):
+        # Salade
+        elif (ItemType.LETTUCE in types and ItemType.TOMATO in types and len(station.contents) == 2):
             station.item = Item(ItemType.SALAD)
             station.contents.clear()
             print("🥗 Salade assemblée!")
     
     def _handle_delivery(self, player: Player):
-        """Gère la livraison des plats"""
-        if not player.held_item:
-            return
+        if not player.held_item: return
+        delivered_type = player.held_item.item_type
+        is_overcooked = getattr(player.held_item, 'overcooked', False)
         
-        delivered_item = player.held_item
-        delivered_type = delivered_item.item_type
-        is_overcooked = getattr(delivered_item, 'overcooked', False)
-        
-        # Chercher une commande correspondante
         for order in self.orders[:]:
             if delivered_type in order.items_needed:
                 self.orders.remove(order)
-                
-                # Calculer le score selon qualité et timing
                 time_bonus = max(0, int(order.time_remaining / 2))
-                
-                if is_overcooked:
-                    # Penalize overcooked food
-                    penalty = 10
-                    self.score -= penalty
-                    player.held_item = None
-                    print(f"😡 OVERCOOKED! {delivered_type.value.upper()} refusé (-{penalty}$)")
-                    # Mark as overcooked for animation
-                    self.completed_orders.append({
-                        'id': order.id,
-                        'type': 'overcooked',
-                        'time': time.time()
-                    })
-                else:
-                    base_price = 15
-                    total = base_price + time_bonus
-                    self.score += total
-                    player.held_item = None
-                    print(f"😄 Livraison parfaite: {delivered_type.value.upper()} (+{total}$ = {base_price}$ + {time_bonus}$ bonus)")
-                    # Mark as completed for animation
-                    self.completed_orders.append({
-                        'id': order.id,
-                        'type': 'completed',
-                        'time': time.time()
-                    })
+                base = 10 if is_overcooked else 15
+                if is_overcooked: base = -10
+                self.score += (base + time_bonus)
+                player.held_item = None
+                self.completed_orders.append({'id': order.id, 'type': 'completed', 'time': time.time()})
                 return
         
-        print(f"❌ Aucune commande pour {delivered_type.value}")
-    
     def chop_at_station(self, player_index: int):
-        """Découpe un item sur la planche à découper"""
-        if player_index >= len(self.players):
-            return
-        
+        if player_index >= len(self.players): return
         player = self.players[player_index]
-        closest_cutting_board = None
-        min_distance = float('inf')
-        
+        closest, min_dist = None, float('inf')
         for station in self.stations:
             if station.station_type == StationType.CUTTING_BOARD:
-                distance = abs(player.x - station.x) + abs(player.y - station.y)
-                if distance < min_distance and distance <= 70:
-                    min_distance = distance
-                    closest_cutting_board = station
-        
-        if closest_cutting_board and closest_cutting_board.item:
-            if closest_cutting_board.item.item_type in [ItemType.TOMATO, ItemType.LETTUCE]:
-                if not closest_cutting_board.item.chopped:
-                    closest_cutting_board.item.chopped = True
-                    print(f"🔪 {closest_cutting_board.item.item_type.value.capitalize()} coupé(e)!")
+                dist = abs(player.x - station.x) + abs(player.y - station.y)
+                if dist < min_dist and dist <= 75:
+                    min_dist = dist
+                    closest = station
+        if closest and closest.item:
+            if closest.item.item_type in [ItemType.TOMATO, ItemType.LETTUCE] and not closest.item.chopped:
+                closest.item.chopped = True
+                print(f"🔪 {closest.item.item_type.value} coupé!")
