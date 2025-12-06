@@ -1,0 +1,102 @@
+[
+  {
+    "num_bots": 1,
+    "num_games": 10,
+    "avg_orders_completed": 2.5,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 42.5,
+    "avg_delivery_time": 15.273945566018423,
+    "std_orders_completed": 0.5270462766947299,
+    "std_money_earned": 8.959786703810408
+  },
+  {
+    "num_bots": 2,
+    "num_games": 10,
+    "avg_orders_completed": 4.8,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 81.6,
+    "avg_delivery_time": 13.922752698659897,
+    "std_orders_completed": 0.4216370213557839,
+    "std_money_earned": 7.167829363048327
+  },
+  {
+    "num_bots": 3,
+    "num_games": 10,
+    "avg_orders_completed": 7,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 119,
+    "avg_delivery_time": 12.320214403527123,
+    "std_orders_completed": 0.4714045207910317,
+    "std_money_earned": 8.013876853447538
+  },
+  {
+    "num_bots": 4,
+    "num_games": 10,
+    "avg_orders_completed": 9.1,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 154.7,
+    "avg_delivery_time": 11.503256715403662,
+    "std_orders_completed": 0.5676462121975467,
+    "std_money_earned": 9.649985607358294
+  },
+  {
+    "num_bots": 5,
+    "num_games": 10,
+    "avg_orders_completed": 10.8,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 183.6,
+    "avg_delivery_time": 11.643629205564055,
+    "std_orders_completed": 1.0327955589886446,
+    "std_money_earned": 17.557524502806956
+  },
+  {
+    "num_bots": 6,
+    "num_games": 10,
+    "avg_orders_completed": 11.4,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 193.8,
+    "avg_delivery_time": 11.700958705690358,
+    "std_orders_completed": 1.2649110640673518,
+    "std_money_earned": 21.50348808914498
+  },
+  {
+    "num_bots": 7,
+    "num_games": 10,
+    "avg_orders_completed": 11.8,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 200.6,
+    "avg_delivery_time": 11.606061419027867,
+    "std_orders_completed": 1.0327955589886446,
+    "std_money_earned": 17.557524502806956
+  },
+  {
+    "num_bots": 8,
+    "num_games": 10,
+    "avg_orders_completed": 10.8,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 183.6,
+    "avg_delivery_time": 12.239933615158765,
+    "std_orders_completed": 1.398411797560202,
+    "std_money_earned": 23.773000558523435
+  },
+  {
+    "num_bots": 9,
+    "num_games": 10,
+    "avg_orders_completed": 11.6,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 197.2,
+    "avg_delivery_time": 11.690118766938797,
+    "std_orders_completed": 1.8973665961010275,
+    "std_money_earned": 32.25523213371747
+  },
+  {
+    "num_bots": 10,
+    "num_games": 10,
+    "avg_orders_completed": 12.5,
+    "avg_orders_expired": 0,
+    "avg_money_earned": 212.5,
+    "avg_delivery_time": 11.206570063222856,
+    "std_orders_completed": 1.2692955176439846,
+    "std_money_earned": 21.57802379994774
+  }
+]

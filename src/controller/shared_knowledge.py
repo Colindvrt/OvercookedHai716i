@@ -169,7 +169,6 @@ class SharedKnowledge:
 
     def claim_task(self, task: Task, agent_id: int):
         task.claimed_by = agent_id
-        print(f"🎯 Agent {agent_id} claim: {task.task_type.value} {task.item_type.value}")
         if task.ingredient_group > 0:
             tl = self.task_lists.get(task.order_id)
             if tl and task.ingredient_group not in tl.group_owners:
@@ -178,15 +177,40 @@ class SharedKnowledge:
     def complete_task(self, task: Task, agent_id: int):
         if task.claimed_by == agent_id:
             task.completed = True
-            print(f"✅ Agent {agent_id} termine : {task.task_type.value} {task.item_type.value}")
             if task.station_pos: self.release_station_at(task.station_pos, agent_id)
-            # ON NE SUPPRIME PAS LA TÂCHE ICI (Important pour les dépendances !)
+            
+            # --- AUTO-CLAIM NEXT STEP (Continuity) ---
+            # Si on vient de poser un ingrédient final OU de finir de cuire (Pizza), on doit enchaîner
+            if task.task_type in [TaskType.PLACE, TaskType.COOK]:
+                 tl = self.task_lists.get(task.order_id)
+                 if tl:
+                     # On cherche la prochaine tâche qui dépend DIRECTEMENT de celle qu'on vient de finir
+                     # OU qui dépend de l'ensemble des tâches de PLACE (cas du burger/salade)
+                     for next_task in tl.tasks:
+                         # Si la tâche suivante est déjà prise, on passe
+                         if next_task.claimed_by is not None: continue
+                         
+                         # Cas 1: Dépendance directe (ex: Pizza crue -> Cuisson)
+                         is_direct_dependency = task.task_id in next_task.dependencies
+                         
+                         # Cas 2: C'est une tâche de récupération/livraison qui attend que tout soit posé
+                         # On vérifie si TOUTES ses dépendances sont satisfaites
+                         completed_ids = {t.task_id for t in tl.tasks if t.completed}
+                         # On ajoute la tâche courante comme complétée (car on est dans complete_task)
+                         completed_ids.add(task.task_id)
+                         
+                         are_dependencies_met = next_task.dependencies and all(d in completed_ids for d in next_task.dependencies)
+                         
+                         if are_dependencies_met:
+                             # Si c'est une tâche logique pour enchaîner
+                             if next_task.task_type in [TaskType.TAKE, TaskType.DELIVER, TaskType.COOK]:
+                                 self.claim_task(next_task, agent_id)
+                                 return # On ne prend qu'une seule tâche suivante
 
     def release_assembly_for_order(self, order_id: int):
         """Libère la table d'assemblage pour cette commande (plat pris de la table)"""
         if order_id in self.order_assembly_assignments:
             del self.order_assembly_assignments[order_id]
-            print(f"🔓 Table d'assemblage libérée pour commande #{order_id}")
 
     def cleanup_order_task_list(self, order_id: int):
         # On supprime seulement quand toute la commande est finie/livrée
@@ -209,9 +233,82 @@ class SharedKnowledge:
         if key not in self.station_locks: return True
         return self.station_locks[key] == agent_id
 
-    def get_next_task(self, agent_id: int) -> Optional[Task]:
+    def get_next_task(self, agent_id: int, agent_pos: Tuple[float, float], stations: List[Station], held_item: Optional[ItemType] = None) -> Optional[Task]:
+        # 1. Priorité ABSOLUE : Tâches de livraison ou récupération de plat assemblé
+        # On parcourt toutes les tâches pour trouver une livraison en attente
+        for order_id in list(self.task_lists.keys()):
+            task_list = self.task_lists[order_id]
+            for task in task_list.tasks:
+                if task.completed: continue
+                if task.claimed_by is not None and task.claimed_by != agent_id: continue
+                
+                # Si c'est une tâche de livraison ou de prise de plat assemblé
+                is_deliver = task.task_type == TaskType.DELIVER
+                is_take_assembly = (task.task_type == TaskType.TAKE and task.target_station_type == StationType.ASSEMBLY)
+                
+                if is_deliver or is_take_assembly:
+                    # Vérifier si faisable (dépendances)
+                    completed_ids = {t.task_id for t in task_list.tasks if t.completed}
+                    if task.dependencies and not all(d in completed_ids for d in task.dependencies):
+                        continue
+                    
+                    # Vérifier compatibilité item
+                    if held_item:
+                        if task.task_type == TaskType.TAKE: continue # On a déjà un truc
+                        if task.item_type != held_item: continue
+                    
+                    # Si on a les mains vides pour un TAKE ou l'item pour un DELIVER
+                    return task
+
+        # 2. Si pas de livraison urgente, on cherche n'importe quelle tâche faisable
+        # Sans notion de distance, juste la première trouvée
         for order_id in list(self.task_lists.keys()):
             task_list = self.task_lists[order_id]
             task = task_list.get_first_doable_task(agent_id)
-            if task: return task
+            if task:
+                # FILTRE: Si on tient un item, on ne peut prendre QUE des tâches qui l'utilisent
+                if held_item:
+                    if task.task_type == TaskType.TAKE: continue
+                    if task.item_type != held_item: continue
+                
+                return task
+        
         return None
+
+    def _estimate_task_position(self, task: Task, stations: List[Station], agent_pos: Tuple[float, float], agent_id: int) -> Optional[Tuple[float, float]]:
+        if task.target_station_type == StationType.INGREDIENT_SPAWN:
+             for s in stations:
+                 if s.station_type == StationType.INGREDIENT_SPAWN and s.ingredient_type == task.item_type:
+                     return (s.x, s.y)
+                     
+        elif task.target_station_type == StationType.ASSEMBLY:
+             return self.get_assigned_assembly(task.order_id)
+             
+        elif task.target_station_type == StationType.DELIVERY:
+             for s in stations:
+                 if s.station_type == StationType.DELIVERY: return (s.x, s.y)
+                 
+        elif task.target_station_type in [StationType.CUTTING_BOARD, StationType.STOVE, StationType.FURNACE]:
+             # Trouver la station la plus proche disponible
+             closest = None
+             min_d = float('inf')
+             for s in stations:
+                 if s.station_type == task.target_station_type:
+                     if self.is_station_available(s, agent_id):
+                         d = (agent_pos[0] - s.x)**2 + (agent_pos[1] - s.y)**2
+                         if d < min_d:
+                             min_d = d
+                             closest = s
+             if closest: return (closest.x, closest.y)
+             
+        return None
+
+    def is_item_needed(self, item_type: ItemType) -> bool:
+        """Vérifie si un item est nécessaire pour une tâche active"""
+        for task_list in self.task_lists.values():
+            for task in task_list.tasks:
+                if not task.completed:
+                    # Si une tâche a besoin de cet item (TAKE ou DELIVER ou CHOP/COOK sur place)
+                    if task.item_type == item_type:
+                        return True
+        return False
