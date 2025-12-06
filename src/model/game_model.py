@@ -143,8 +143,9 @@ class GameModel:
                     order.time_remaining -= delta_time
                     if order.time_remaining <= 0:
                         order.expired = True
-                        self.score -= 20
-                        print(f"⏰ Commande expirée: {order.items_needed[0].value} (-20$)")
+                        penalty = -15
+                        self.score += penalty
+                        print(f"⏰ Commande expirée: {order.items_needed[0].value} ({penalty}$)")
                         self.orders.remove(order)
                         self.completed_orders.append({'id': order.id, 'type': 'expired', 'time': current_time})
         
@@ -308,14 +309,27 @@ class GameModel:
         if not player.held_item: return
         delivered_type = player.held_item.item_type
         is_overcooked = getattr(player.held_item, 'overcooked', False)
-        
+
         for order in self.orders[:]:
             if delivered_type in order.items_needed:
                 self.orders.remove(order)
-                time_bonus = max(0, int(order.time_remaining / 2))
-                base = 10 if is_overcooked else 15
-                if is_overcooked: base = -10
-                self.score += (base + time_bonus)
+
+                if is_overcooked:
+                    # Plat trop cuit = 0$
+                    payment = 0
+                    print(f"⚠️ Commande trop cuite: {delivered_type.value} (0$)")
+                else:
+                    base_payment = 15
+                    # Bonus 15% si livré dans les 30 premières secondes
+                    if order.time_remaining >= 30:
+                        bonus = base_payment * 0.15
+                        payment = int(base_payment + bonus)
+                        print(f"⚡ Commande express: {delivered_type.value} (+{payment}$ avec bonus 15%)")
+                    else:
+                        payment = base_payment
+                        print(f"✅ Commande livrée: {delivered_type.value} (+{payment}$)")
+
+                self.score += payment
                 player.held_item = None
                 self.completed_orders.append({'id': order.id, 'type': 'completed', 'time': time.time()})
                 return
