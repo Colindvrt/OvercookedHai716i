@@ -3,7 +3,7 @@ from typing import Dict, Optional, List, Tuple
 from enum import Enum
 from collections import deque
 import time
-from src.model.game_model import ItemType, Station, Order, StationType
+from src.model.game_model import ItemType, Station, Order, StationType, Player
 
 class TaskType(Enum):
     TAKE = "take"; CHOP = "chop"; COOK = "cook"; PLACE = "place"; DELIVER = "deliver"; WAIT_COOKING = "wait_cooking"
@@ -233,14 +233,30 @@ class SharedKnowledge:
         if key not in self.station_locks: return True
         return self.station_locks[key] == agent_id
 
-    def get_next_task(self, agent_id: int, agent_pos: Tuple[float, float], stations: List[Station], held_item: Optional[ItemType] = None) -> Optional[Task]:
-        # 1. Priorité ABSOLUE : Tâches de livraison ou récupération de plat assemblé
+    def get_next_task(self, agent_id: int, agent_pos: Tuple[float, float], stations: List[Station], players: List[Player]) -> Optional[Task]:
+        my_player = players[agent_id]
+        held_item = my_player.held_item.item_type if my_player.held_item else None
+
+        # 0. Priorité SUPRÊME : Tâches déjà assignées à cet agent (via chaining)
+        for order_id in list(self.task_lists.keys()):
+            task_list = self.task_lists[order_id]
+            for task in task_list.tasks:
+                if task.completed: continue
+                if task.claimed_by == agent_id:
+                    # C'est MA tâche, je dois la faire
+                    # Vérif dépendances (au cas où)
+                    completed_ids = {t.task_id for t in task_list.tasks if t.completed}
+                    if task.dependencies and not all(d in completed_ids for d in task.dependencies):
+                        continue
+                    return task
+
+        # 1. Priorité ABSOLUE : Tâches de livraison ou récupération de plat assemblé (Non assignées)
         # On parcourt toutes les tâches pour trouver une livraison en attente
         for order_id in list(self.task_lists.keys()):
             task_list = self.task_lists[order_id]
             for task in task_list.tasks:
                 if task.completed: continue
-                if task.claimed_by is not None and task.claimed_by != agent_id: continue
+                if task.claimed_by is not None: continue # Déjà pris (par qqn d'autre ou moi - traité au dessus)
                 
                 # Si c'est une tâche de livraison ou de prise de plat assemblé
                 is_deliver = task.task_type == TaskType.DELIVER
@@ -252,11 +268,24 @@ class SharedKnowledge:
                     if task.dependencies and not all(d in completed_ids for d in task.dependencies):
                         continue
                     
-                    # Vérifier compatibilité item
+                    # Vérifier compatibilité item (si on tient quelque chose)
                     if held_item:
                         if task.task_type == TaskType.TAKE: continue # On a déjà un truc
                         if task.item_type != held_item: continue
                     
+                    # ✅ CRITIQUE : Si l'item est tenu par QUELQU'UN D'AUTRE, on ne touche pas
+                    # Sauf si C'EST NOUS qui le tenons !
+                    if not held_item:
+                        holder_id = None
+                        for i, p in enumerate(players):
+                            if p.held_item and p.held_item.item_type == task.item_type:
+                                holder_id = i
+                                break
+                        
+                        if holder_id is not None and holder_id != agent_id:
+                            # Quelqu'un d'autre a l'item, il DOIT faire la tâche
+                            continue
+
                     # Si on a les mains vides pour un TAKE ou l'item pour un DELIVER
                     return task
 
@@ -271,6 +300,17 @@ class SharedKnowledge:
                     if task.task_type == TaskType.TAKE: continue
                     if task.item_type != held_item: continue
                 
+                # ✅ CRITIQUE : Si l'item est tenu par QUELQU'UN D'AUTRE
+                # Sauf si C'EST NOUS qui le tenons !
+                if not held_item and task.target_station_type != StationType.INGREDIENT_SPAWN:
+                    holder_id = None
+                    for i, p in enumerate(players):
+                        if p.held_item and p.held_item.item_type == task.item_type:
+                            holder_id = i
+                            break
+                    if holder_id is not None and holder_id != agent_id:
+                        continue
+
                 return task
         
         return None

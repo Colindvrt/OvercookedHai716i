@@ -150,6 +150,7 @@ class AIBot:
                                     s.item = None
                             self.shared_knowledge.release_station_at(self.current_task.station_pos, self.player_index)
 
+                        # Force clear task immediately
                         self.current_task = None
                         self.queue.clear()
                         # Les mains pleines seront gérées au prochain update (jetées automatiquement)
@@ -159,8 +160,7 @@ class AIBot:
 
             # D'ABORD vérifier s'il y a une tâche disponible
             # On passe l'item tenu pour filtrer les tâches compatibles
-            held_type = p.held_item.item_type if p.held_item else None
-            next_task = self.shared_knowledge.get_next_task(self.player_index, (p.x, p.y), m.stations, held_item=held_type)
+            next_task = self.shared_knowledge.get_next_task(self.player_index, (p.x, p.y), m.stations, m.players)
 
             if next_task:
                 # ✅ Il y a une tâche disponible (et compatible avec ce qu'on tient)
@@ -173,6 +173,20 @@ class AIBot:
                     # Vérifier si l'item est nécessaire QUAND MÊME (pour plus tard)
                     if self.shared_knowledge.is_item_needed(p.held_item.item_type):
                         # On garde l'item et on attend
+                        # MAIS ATTENTION : Si on attend indéfiniment, c'est qu'on a raté le coche pour prendre la tâche
+                        # On force la recherche d'une tâche qui utilise cet item, même si pas "optimale"
+                        
+                        # Si c'est une tomate/salade, on cherche une planche libre pour anticiper
+                        if p.held_item.item_type in [ItemType.TOMATO, ItemType.LETTUCE] and not p.held_item.chopped:
+                             board = self._free_board(m)
+                             if board:
+                                 # On va vers la planche même sans tâche officielle, pour débloquer
+                                 self._push(Step.GO_TO, board)
+                                 self._push(Step.INTERACT, board) # Poser
+                                 self._push(Step.CHOP, board)
+                                 self._push(Step.INTERACT, board) # Reprendre
+                                 return
+
                         self._push(Step.WAIT, None, 0.5)
                     else:
                         # Item inutile -> jeter
@@ -275,6 +289,14 @@ class AIBot:
 
         elif task.task_type == TaskType.CHOP:
             if p.held_item and p.held_item.chopped: return
+            
+            # Si on n'a pas l'item à couper, on va le chercher (normalement géré par TAKE avant)
+            if not p.held_item or p.held_item.item_type != task.item_type:
+                 # Cas rare de désynchro : on abandonne la tâche pour la reprendre proprement
+                 self.current_task = None
+                 self.queue.clear()
+                 return
+
             board = self._free_board(m)
             if board:
                 if self.shared_knowledge.reserve_station(board, self.player_index):
@@ -284,7 +306,9 @@ class AIBot:
                     self._push(Step.CHOP, board)
                     self._push(Step.INTERACT, board)
                 else: self._push(Step.WAIT, None, 0.5)
-            else: self._push(Step.WAIT, None, 0.5)
+            else: 
+                # Pas de planche libre : on attend avec l'item en main
+                self._push(Step.WAIT, None, 1.0)
 
         elif task.task_type == TaskType.COOK:
             if task.item_type == ItemType.RAW_PATTY:
@@ -307,17 +331,15 @@ class AIBot:
                     else: self._push(Step.WAIT, None, 0.5)
 
             elif task.item_type == ItemType.UNCOOKED_PIZZA:
+                # 1. Si c'est cuit, on va le chercher (priorité absolue)
                 cooked_furnace = self._furnace_with(m, ItemType.PIZZA)
                 if cooked_furnace:
-                    if p.held_item is None:
-                        self._push(Step.GO_TO, cooked_furnace)
-                        self._push(Step.INTERACT, cooked_furnace)
-                    else: self._clear_hands(m)
+                    if p.held_item: self._clear_hands(m)
+                    self._push(Step.GO_TO, cooked_furnace)
+                    self._push(Step.INTERACT, cooked_furnace)
                     return
-                cooking_furnace = self._furnace_with(m, ItemType.UNCOOKED_PIZZA)
-                if cooking_furnace:
-                    self._push(Step.WAIT, None, 0.5)
-                    return
+
+                # 2. Si on tient une pizza crue, on VEUT la mettre au four
                 if p.held_item and p.held_item.item_type == ItemType.UNCOOKED_PIZZA:
                     furnace = self._free_furnace(m)
                     if furnace:
@@ -326,7 +348,21 @@ class AIBot:
                             self._push(Step.GO_TO, furnace)
                             self._push(Step.INTERACT, furnace)
                         else: self._push(Step.WAIT, None, 0.5)
-                    else: self._push(Step.WAIT, None, 0.5)
+                    else: 
+                        # Pas de four libre, on attend
+                        self._push(Step.WAIT, None, 0.5)
+                    return
+
+                # 3. Si on ne tient rien (ou autre chose), on vérifie si ça cuit
+                cooking_furnace = self._furnace_with(m, ItemType.UNCOOKED_PIZZA)
+                if cooking_furnace:
+                    # Ça cuit, on attend devant
+                    self._push(Step.GO_TO, cooking_furnace)
+                    self._push(Step.WAIT, None, 0.5)
+                    return
+                
+                # 4. Si on est là, on a un problème (pas d'item, rien au four)
+                self._push(Step.WAIT, None, 0.5)
 
         elif task.task_type == TaskType.PLACE:
             assembly = self._assembly(m)
@@ -342,33 +378,52 @@ class AIBot:
             if p.held_item and p.held_item.item_type == task.item_type:
                 self._push(Step.GO_TO, delivery)
                 self._push(Step.INTERACT, delivery)
-            # Sinon, aller le chercher
-            else:
-                # Table Assemblage
-                assembly = self._assembly(m)
-                if assembly:
-                    if assembly.item and assembly.item.item_type == task.item_type:
-                        if p.held_item: self._clear_hands(m)
-                        self._push(Step.GO_TO, assembly)
-                        self._push(Step.INTERACT, assembly)
-                        # Ne PAS libérer la table ici pour éviter de perdre la référence si le pick-up échoue
-                        # Elle sera libérée automatiquement à la fin de la commande
-                        return
-                    else:
-                        # Debug: pourquoi on ne trouve pas l'item ?
-                        pass
-                        # print(f"⚠️ Agent {self.player_index}: Table d'assemblage trouvée mais item incorrect/absent. Attendu: {task.item_type}, Trouvé: {assembly.item.item_type if assembly.item else 'None'}")
-                else:
-                     print(f"⚠️ Agent {self.player_index}: Pas de table d'assemblage trouvée pour DELIVER {task.item_type}")
+                return
 
-                # Four (Pizza)
-                if task.item_type == ItemType.PIZZA:
-                    furnace = self._furnace_with(m, ItemType.PIZZA)
-                    if furnace:
-                        if p.held_item: self._clear_hands(m)
-                        self._push(Step.GO_TO, furnace)
-                        self._push(Step.INTERACT, furnace)
-                        return
+            # Sinon, aller le chercher
+            
+            # 1. Cas Spécial PIZZA : Vérifier le four en priorité
+            if task.item_type == ItemType.PIZZA:
+                furnace = self._furnace_with(m, ItemType.PIZZA)
+                if furnace:
+                    if p.held_item: self._clear_hands(m)
+                    self._push(Step.GO_TO, furnace)
+                    self._push(Step.INTERACT, furnace)
+                    return
+
+            # 2. Vérifier la table d'assemblage (Burger, Salade, ou Pizza pas encore cuite/bug)
+            assembly = self._assembly(m)
+            if assembly and assembly.item and assembly.item.item_type == task.item_type:
+                if p.held_item: self._clear_hands(m)
+                self._push(Step.GO_TO, assembly)
+                self._push(Step.INTERACT, assembly)
+                # Ne PAS libérer la table ici pour éviter de perdre la référence si le pick-up échoue
+                return
+            
+            # 3. Si on arrive ici, on n'a pas trouvé l'item sur les stations
+            if task.item_type == ItemType.PIZZA:
+                 # Vérifier si une pizza est en train de cuire (Uncooked -> Pizza)
+                 cooking_furnace = self._furnace_with(m, ItemType.UNCOOKED_PIZZA)
+                 if cooking_furnace:
+                     # Elle cuit, on attend
+                     self._push(Step.WAIT, None, 0.5)
+                     return
+            
+            # 4. Vérifier si un AUTRE agent porte l'item (Race condition / Vol)
+            for other_p in m.players:
+                if other_p == p: continue
+                if other_p.held_item and other_p.held_item.item_type == task.item_type:
+                    # Quelqu'un d'autre l'a ! Je lâche l'affaire.
+                    # print(f"⚠️ Agent {self.player_index}: L'item {task.item_type.value} est tenu par un autre agent. J'abandonne la tâche.")
+                    task.claimed_by = None # On libère la tâche
+                    self.current_task = None
+                    self.queue.clear()
+                    return
+
+            # Vrai problème si on ne trouve rien nulle part
+            # On attend un peu avant de spammer (peut-être qu'il vient d'apparaître)
+            self._push(Step.WAIT, None, 1.0)
+            # print(f"⚠️ Agent {self.player_index}: Item {task.item_type.value} introuvable pour DELIVER (ni sur table, ni four)")
 
     def _clear_hands(self, m):
         s = self._free_board(m)

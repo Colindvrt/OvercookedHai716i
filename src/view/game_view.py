@@ -321,10 +321,15 @@ class GameView:
         for idx, order in enumerate(model.orders):
             if order.id not in self.customers:
                 target_x = start_x + idx * spacing
+                # Décalage à l'apparition pour éviter qu'ils soient tous superposés
+                spawn_x = self.width + 50 + idx * 80 
+                # Décalage Y pour donner un effet de profondeur/foule
+                spawn_y = 550 + (idx % 3) * 25 - 10
+                
                 self.customers[order.id] = {
-                    'x': self.width + 50, 
+                    'x': spawn_x, 
                     'target_x': target_x, 
-                    'y': 550,
+                    'y': spawn_y,
                     'waiting': False,
                     'leaving': False, 
                     'animation_offset': 0, 

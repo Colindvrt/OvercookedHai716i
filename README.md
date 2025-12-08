@@ -1,6 +1,12 @@
-# Overcooked Simplifié
+# Overcooked Simplifié - Simulation Multi-Agents
+Version simplifiée du jeu Overcooked implémentée en Python avec une architecture MVC, conçue pour simuler et analyser le comportement d'agents autonomes.
 
-Version simplifiée du jeu Overcooked implémentée en Python avec une architecture MVC.
+## Fonctionnalités Clés
+
+- **Simulation Multi-Agents** : Choisissez le nombre de bots (de 1 à 10) pour voir comment ils collaborent (ou non !).
+- **Commandes Dynamiques** : Le flux de commandes s'adapte au nombre de joueurs pour maintenir une pression constante.
+- **Statistiques en Temps Réel** : Suivez le score, le temps restant et les commandes en cours directement sur l'interface.
+- **Graphismes Améliorés** : Interface moderne avec files d'attente de clients, animations de cuisson et indicateurs visuels.
 
 ## Installation
 
@@ -22,34 +28,36 @@ uv pip install -e .
 ```bash
 python main.py
 ```
+Au lancement, le jeu vous demandera dans le terminal de saisir le nombre de bots souhaités.
+
+## Simulation et Analyse
+
+Le projet inclut des outils pour lancer des simulations massives et analyser les performances :
+
+```bash
+# Lancer une batterie de tests (1 à 10 bots, 100 parties)
+python run_simulation.py
+
+# Visualiser les résultats (génère des graphiques)
+python visualize_results.py
+```
 
 ## Contrôles
 
-- **Flèches directionnelles** : Déplacer le joueur
-- **Espace** : Interagir avec une station
+Le jeu est entièrement autonome (bots), mais vous pouvez observer :
 - **Échap** : Quitter le jeu
-
-## Gameplay
-
-1. Ramassez des ingrédients aux points de spawn (tomate, salade, pain, viande crue)
-2. Coupez les légumes sur les planches à découper
-3. Cuisez la viande sur les fourneaux
-4. Assemblez les burgers à la station d'assemblage
-5. Livrez les commandes à la station de livraison
 
 ## Structure du projet
 
 ```
 overcooked-simple/
-├── main.py                 # Point d'entrée
+├── main.py                 # Point d'entrée du jeu interactif
+├── run_simulation.py       # Script de simulation headless
+├── visualize_results.py    # Analyse des données de simulation
 ├── src/
-│   ├── __init__.py
-│   ├── model/              # Modèle (logique métier)
-│   │   └── game_model.py
-│   ├── view/               # Vue (affichage)
-│   │   └── game_view.py
-│   └── controller/         # Contrôleur (gestion des entrées)
-│       └── game_controller.py
+│   ├── model/              # Logique métier (GameModel, Item, Player)
+│   ├── view/               # Rendu graphique (GameView, Pygame)
+│   └── controller/         # IA et Gestion (AIBot, SharedKnowledge)
 ├── pyproject.toml
 └── README.md
 ```

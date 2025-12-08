@@ -77,9 +77,10 @@ class GameModel:
         self._setup_kitchen()
     
     def _setup_kitchen(self):
-        """Configuration dynamique : ~1 station pour 2 bots (Max 5)"""
+        """Configuration dynamique : 1 station par bot"""
         self.stations = []
-        width = 1000
+        # On élargit la cuisine pour faire tenir tout le monde (était 1000)
+        width = 1600
         
         # 1. SPAWN POINTS (Fixes)
         spawn_types = [ItemType.TOMATO, ItemType.LETTUCE, ItemType.BREAD, ItemType.RAW_PATTY, ItemType.CHEESE]
@@ -88,9 +89,8 @@ class GameModel:
             self.stations.append(Station((i + 1) * step_spawn, 100, StationType.INGREDIENT_SPAWN, ingredient_type=ing_type))
         
         nb_bots = len(self.players)
-        # ✅ NOUVELLE FORMULE : 2 bots -> 2 stations, 10+ bots -> 5 stations (max)
-        # 1 station par bot jusqu'à un maximum de 5 stations
-        nb_service = min(5, max(1, nb_bots))
+        # ✅ NOUVELLE FORMULE : 1 station par bot, comme demandé
+        nb_service = nb_bots
         
         # 2. STATIONS DE TRAVAIL (Milieu)
         row2_types = []
@@ -114,28 +114,25 @@ class GameModel:
             self.stations.append(Station((i + 1) * step_row3, 300, st_type, cooking_duration=duration))
 
     def _generate_order(self):
-        if len(self.orders) < 3:
-            possible_orders = [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]            
-            chosen = random.choice(possible_orders)
-            order = Order([chosen], id=self.next_order_id)
-            self.next_order_id += 1
-            self.orders.append(order)
-            print(f"Nouvelle commande #{order.id}: {chosen.value.upper()}")
-            
-            if not self.game_started:
-                self.game_started = True
-                self.start_time = time.time()
-                print("⏱ Game timer started!")
-            
-            nb_bots = len(self.players) if len(self.players) > 0 else 1
-            base_delay = 20.0 / nb_bots
-            self.next_order_time = time.time() + random.uniform(base_delay * 0.9, base_delay * 1.1)
+        possible_orders = [ItemType.BURGER, ItemType.PIZZA, ItemType.SALAD]            
+        chosen = random.choice(possible_orders)
+        order = Order([chosen], id=self.next_order_id)
+        self.next_order_id += 1
+        self.orders.append(order)
+        print(f"Nouvelle commande #{order.id}: {chosen.value.upper()}")
+        
+        if not self.game_started:
+            self.game_started = True
+            self.start_time = time.time()
+            print("⏱ Game timer started!")
     
     def update(self, delta_time: float):
         current_time = time.time()
         self.completed_orders = [o for o in self.completed_orders if current_time - o['time'] < 3.0]
         
-        if current_time >= self.next_order_time and len(self.orders) < 3:
+        # MAINTENIR LE NOMBRE DE COMMANDES = NOMBRE DE BOTS
+        target_orders = max(1, len(self.players))
+        while len(self.orders) < target_orders:
             self._generate_order()
         
         if self.game_started:
@@ -183,7 +180,7 @@ class GameModel:
             
             # Limites écran (pour ne pas sortir de la fenêtre)
             # On garde une petite marge (25px)
-            new_x = max(25, min(975, player.x + step_x))
+            new_x = max(25, min(1575, player.x + step_x))
             new_y = max(25, min(675, player.y + step_y))
             
             # Application directe sans vérifier les obstacles
@@ -321,8 +318,8 @@ class GameModel:
                     print(f"⚠️ Commande trop cuite: {delivered_type.value} (0$)")
                 else:
                     base_payment = 15
-                    # Bonus 15% si livré dans les 30 premières secondes
-                    if order.time_remaining >= 30:
+                    # Bonus 15% si livré dans les 15 premières secondes (60 - 45 = 15)
+                    if order.time_remaining >= 45:
                         bonus = base_payment * 0.15
                         payment = int(base_payment + bonus)
                         print(f"⚡ Commande express: {delivered_type.value} (+{payment}$ avec bonus 15%)")

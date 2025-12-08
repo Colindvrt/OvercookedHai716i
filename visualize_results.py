@@ -55,19 +55,26 @@ def plot_results(results):
     ax3.grid(True, alpha=0.3)
     ax3.set_xticks(num_bots)
 
-    # 4. Commandes expirées vs complétées
+    # 4. Efficacité par bot (Argent / Bot)
     ax4 = axes[1, 1]
-    width = 0.35
-    x = np.arange(len(num_bots))
-    bars1 = ax4.bar(x - width/2, avg_orders, width, label='Complétées', color='#2ecc71')
-    bars2 = ax4.bar(x + width/2, avg_expired, width, label='Expirées', color='#e74c3c')
+    efficiency = [r['avg_money_earned'] / r['num_bots'] for r in results]
+    
+    # Barres colorées selon l'efficacité
+    colors = plt.cm.viridis(np.linspace(0, 1, len(num_bots)))
+    bars = ax4.bar(num_bots, efficiency, color=colors, alpha=0.8)
+    
     ax4.set_xlabel('Nombre de bots', fontsize=12)
-    ax4.set_ylabel('Nombre de commandes', fontsize=12)
-    ax4.set_title('📦 Commandes complétées vs expirées', fontsize=13, fontweight='bold')
-    ax4.set_xticks(x)
-    ax4.set_xticklabels(num_bots)
-    ax4.legend()
+    ax4.set_ylabel('Argent généré par bot ($)', fontsize=12)
+    ax4.set_title('� Efficacité individuelle (Argent/Bot)', fontsize=13, fontweight='bold')
     ax4.grid(True, alpha=0.3, axis='y')
+    ax4.set_xticks(num_bots)
+    
+    # Ajouter les valeurs sur les barres
+    for bar in bars:
+        height = bar.get_height()
+        ax4.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.1f}$',
+                ha='center', va='bottom', fontsize=9)
 
     plt.tight_layout()
     plt.savefig('simulation_results.png', dpi=300, bbox_inches='tight')
