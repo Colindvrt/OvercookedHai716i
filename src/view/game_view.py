@@ -436,40 +436,74 @@ class GameView:
     
     # ✅ MODIFIÉ : Ajout de player_index
     def _draw_chef_character(self, x, y, player_index=0):
+        # Ombre au sol
         shadow = pygame.Surface((40, 10), pygame.SRCALPHA)
         pygame.draw.ellipse(shadow, (0, 0, 0, 60), (0, 0, 40, 10))
         self.screen.blit(shadow, (x - 20, y + 25))
-        pygame.draw.rect(self.screen, (50, 50, 50), (x - 8, y + 10, 6, 18), border_radius=3)
-        pygame.draw.rect(self.screen, (50, 50, 50), (x + 2, y + 10, 6, 18), border_radius=3)
-        
-        # ✅ AJOUTÉ : Couleur d'uniforme différente
+
+        # Couleurs en fonction du joueur
         if player_index == 0:
-            uniform_color = self.COLORS['chef_uniform'] # Player 0 (Chef) - Blanc
+            fur_color = (255, 160, 50)  # Chat Roux (Chef)
+            belly_color = (255, 220, 180)
+            details_color = (200, 100, 0)
         else:
-            uniform_color = (180, 210, 255) # Player 1 (Commis) - Bleu clair
-            
-        body_rect = pygame.Rect(x - 14, y - 8, 28, 22)
-        pygame.draw.rect(self.screen, uniform_color, body_rect, border_radius=3) # Utilise uniform_color
-        pygame.draw.rect(self.screen, (220, 220, 220), body_rect, 2, border_radius=3)
-        for by in [y - 3, y + 3]:
-            pygame.draw.circle(self.screen, (255, 215, 0), (x, by), 2)
+            fur_color = (150, 150, 160) # Chat Gris (Commis)
+            belly_color = (220, 220, 230)
+            details_color = (100, 100, 110)
+
+        # Queue (animée)
+        tail_offset = math.sin(self.animation_time * 5) * 5
+        tail_points = [(x, y + 10), (x - 20, y + 15), (x - 25 + tail_offset, y + 5)]
+        if player_index == 1: # Variation pour le chat gris
+             tail_points = [(x, y + 10), (x + 20, y + 15), (x + 25 - tail_offset, y + 5)]
+        pygame.draw.lines(self.screen, fur_color, False, tail_points, 4)
+
+        # Pattes arrière (Pieds)
+        pygame.draw.circle(self.screen, fur_color, (x - 10, y + 22), 6)
+        pygame.draw.circle(self.screen, fur_color, (x + 10, y + 22), 6)
+
+        # Corps
+        body_rect = pygame.Rect(x - 16, y - 5, 32, 26)
+        pygame.draw.ellipse(self.screen, fur_color, body_rect)
+        pygame.draw.ellipse(self.screen, belly_color, (x - 9, y, 18, 19)) # Ventre
+
+        # Pattes avant (Mains)
+        pygame.draw.circle(self.screen, fur_color, (x - 14, y + 8), 6)
+        pygame.draw.circle(self.screen, fur_color, (x + 14, y + 8), 6)
         
-        pygame.draw.rect(self.screen, uniform_color, (x - 20, y - 5, 8, 15), border_radius=2) # Utilise uniform_color
-        pygame.draw.rect(self.screen, uniform_color, (x + 12, y - 5, 8, 15), border_radius=2) # Utilise uniform_color
+        # Tête
+        head_y = y - 18
+        pygame.draw.circle(self.screen, fur_color, (x, head_y), 15)
         
-        pygame.draw.circle(self.screen, self.COLORS['chef_skin'], (x - 18, y + 8), 4)
-        pygame.draw.circle(self.screen, self.COLORS['chef_skin'], (x + 18, y + 8), 4)
-        pygame.draw.circle(self.screen, self.COLORS['chef_skin'], (x, y - 20), 11)
-        pygame.draw.circle(self.screen, (255, 255, 255), (x - 4, y - 21), 3)
-        pygame.draw.circle(self.screen, (255, 255, 255), (x + 4, y - 21), 3)
-        pygame.draw.circle(self.screen, self.COLORS['chef_eyes'], (x - 4, y - 20), 2)
-        pygame.draw.circle(self.screen, self.COLORS['chef_eyes'], (x + 4, y - 20), 2)
-        pygame.draw.arc(self.screen, (200, 100, 100), (x - 4, y - 17, 8, 5), 0, 3.14, 2)
-        pygame.draw.rect(self.screen, self.COLORS['chef_hat'], (x - 12, y - 32, 24, 6), border_radius=2)
-        pygame.draw.ellipse(self.screen, self.COLORS['chef_hat'], (x - 10, y - 45, 20, 18))
-        pygame.draw.ellipse(self.screen, (220, 220, 220), (x - 10, y - 45, 20, 18), 2)
-        pygame.draw.line(self.screen, (220, 220, 220), (x - 5, y - 42), (x - 3, y - 35), 1)
-        pygame.draw.line(self.screen, (220, 220, 220), (x + 5, y - 42), (x + 3, y - 35), 1)
+        # Oreilles
+        pygame.draw.polygon(self.screen, fur_color, [(x - 10, head_y - 8), (x - 18, head_y - 22), (x - 4, head_y - 12)])
+        pygame.draw.polygon(self.screen, fur_color, [(x + 10, head_y - 8), (x + 18, head_y - 22), (x + 4, head_y - 12)])
+        
+        # Intérieur des oreilles
+        pygame.draw.polygon(self.screen, (255, 200, 200), [(x - 10, head_y - 8), (x - 15, head_y - 18), (x - 6, head_y - 11)])
+        pygame.draw.polygon(self.screen, (255, 200, 200), [(x + 10, head_y - 8), (x + 15, head_y - 18), (x + 6, head_y - 11)])
+
+        # Visage
+        # Yeux
+        pygame.draw.circle(self.screen, (255, 255, 255), (x - 6, head_y - 2), 4)
+        pygame.draw.circle(self.screen, (255, 255, 255), (x + 6, head_y - 2), 4)
+        pygame.draw.circle(self.screen, (0, 0, 0), (x - 6, head_y - 2), 2)
+        pygame.draw.circle(self.screen, (0, 0, 0), (x + 6, head_y - 2), 2)
+
+        # Nez
+        pygame.draw.polygon(self.screen, (255, 150, 150), [(x - 2, head_y + 3), (x + 2, head_y + 3), (x, head_y + 6)])
+
+        # Moustaches
+        pygame.draw.line(self.screen, (50, 50, 50), (x - 3, head_y + 4), (x - 14, head_y + 2), 1)
+        pygame.draw.line(self.screen, (50, 50, 50), (x - 3, head_y + 5), (x - 14, head_y + 7), 1)
+        pygame.draw.line(self.screen, (50, 50, 50), (x + 3, head_y + 4), (x + 14, head_y + 2), 1)
+        pygame.draw.line(self.screen, (50, 50, 50), (x + 3, head_y + 5), (x + 14, head_y + 7), 1)
+
+        # Toque de Chef (plus petite, entre les oreilles)
+        pygame.draw.rect(self.screen, self.COLORS['chef_hat'], (x - 9, head_y - 24, 18, 6), border_radius=2) # Bandeau
+        pygame.draw.ellipse(self.screen, self.COLORS['chef_hat'], (x - 11, head_y - 36, 22, 16)) # Haut de la toque
+        pygame.draw.ellipse(self.screen, (220, 220, 220), (x - 11, head_y - 36, 22, 16), 1) # Contour léger
+
     
     # ✅ MODIFIÉ : Ajout de enumerate et player_index
     def _draw_players(self, players):
